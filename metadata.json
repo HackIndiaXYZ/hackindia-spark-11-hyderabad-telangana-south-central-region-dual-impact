@@ -1,0 +1,6 @@
+{
+  "name": "Smart Expiry Scanner AI",
+  "description": "AI-powered product expiry date scanner, inventory tracker, reminder system, and Gemini recipe generator.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
