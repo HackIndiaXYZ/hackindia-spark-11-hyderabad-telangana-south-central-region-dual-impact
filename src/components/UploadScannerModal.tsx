@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, FileImage, Check, ArrowLeft, Loader2, Sparkles, RefreshCw } from 'lucide-react';
 import { Product, OcrScanResult } from '../types';
+import { sharpenImageData, thresholdImageData } from '../utils/imageFilters';
 
 interface UploadScannerModalProps {
   onBack: () => void;
@@ -36,18 +37,63 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
     reader.onloadend = () => {
       const base64Str = reader.result as string;
       setImagePreview(base64Str);
-      analyzeImage(base64Str, file.name);
+      
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) {
+          analyzeImage(base64Str, file.name);
+          return;
+        }
+
+        const targetW = img.width;
+        const targetH = img.height;
+        canvas.width = targetW * 2;
+        canvas.height = targetH * 2;
+
+        // 1. Original (2x Upsampled)
+        ctx.drawImage(img, 0, 0, targetW * 2, targetH * 2);
+        const originalBase64 = canvas.toDataURL('image/jpeg', 0.90);
+
+        // 2. Enhanced (Contrast Boost + Grayscale + Sharpen)
+        ctx.clearRect(0, 0, targetW * 2, targetH * 2);
+        ctx.filter = 'contrast(1.6) brightness(1.05) grayscale(1)';
+        ctx.drawImage(img, 0, 0, targetW * 2, targetH * 2);
+        sharpenImageData(ctx, targetW * 2, targetH * 2);
+        const enhancedBase64 = canvas.toDataURL('image/jpeg', 0.90);
+
+        // 3. Threshold (Binarized High Contrast Black & White)
+        ctx.clearRect(0, 0, targetW * 2, targetH * 2);
+        ctx.filter = 'contrast(2.0) brightness(1.0) grayscale(1)';
+        ctx.drawImage(img, 0, 0, targetW * 2, targetH * 2);
+        thresholdImageData(ctx, targetW * 2, targetH * 2);
+        const thresholdBase64 = canvas.toDataURL('image/jpeg', 0.90);
+
+        analyzeImage(originalBase64, file.name, enhancedBase64, thresholdBase64);
+      };
+      img.src = base64Str;
     };
     reader.readAsDataURL(file);
   };
 
-  const analyzeImage = async (base64Data: string, fileName?: string) => {
+  const analyzeImage = async (
+    base64Data: string, 
+    fileName?: string,
+    enhancedBase64?: string,
+    thresholdBase64?: string
+  ) => {
     setIsAnalyzing(true);
     try {
       const response = await fetch('/api/ocr-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Data, fileName }),
+        body: JSON.stringify({ 
+          imageBase64: base64Data, 
+          fileName,
+          enhancedBase64,
+          thresholdBase64
+        }),
       });
 
       if (!response.ok) {

@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Camera, RefreshCw, Check, ArrowLeft, Loader2, Sparkles, AlertCircle } from 'lucide-react';
 import { Product, OcrScanResult } from '../types';
+import { sharpenImageData, thresholdImageData } from '../utils/imageFilters';
 
 interface CameraScannerModalProps {
   onBack: () => void;
@@ -93,21 +94,6 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const captureFrameAndAnalyze = async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    setCapturedImage(dataUrl);
-
-    stopCamera();
-    setIsAnalyzing(true);
-
     try {
       const video = videoRef.current;
       const canvas = canvasRef.current;
@@ -120,23 +106,46 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       const cropX = Math.floor((vWidth - cropWidth) / 2);
       const cropY = Math.floor((vHeight - cropHeight) / 2);
 
-      canvas.width = cropWidth;
-      canvas.height = cropHeight;
+      // Rebuild OCR Pipeline: Upsample to 2x resolution
+      const targetW = cropWidth * 2;
+      const targetH = cropHeight * 2;
+      canvas.width = targetW;
+      canvas.height = targetH;
 
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) return;
 
-      // Image Preprocessing: Enhancing contrast, grayscaling, and sharpening for OCR readability
-      ctx.filter = 'contrast(1.45) brightness(1.05) grayscale(0.2) saturate(1.1)';
-      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
-      
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
-      setCapturedImage(dataUrl);
+      // 1. Original Image (2x Upsampled)
+      ctx.filter = 'none';
+      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, targetW, targetH);
+      const originalBase64 = canvas.toDataURL('image/jpeg', 0.90);
+      setCapturedImage(originalBase64); // Display cropped original to user
+
+      // 2. Enhanced Image (Contrast Boost + Grayscale + Sharpen)
+      ctx.clearRect(0, 0, targetW, targetH);
+      ctx.filter = 'contrast(1.6) brightness(1.05) grayscale(1)';
+      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, targetW, targetH);
+      sharpenImageData(ctx, targetW, targetH);
+      const enhancedBase64 = canvas.toDataURL('image/jpeg', 0.90);
+
+      // 3. Threshold Image (Binarized High Contrast Black & White)
+      ctx.clearRect(0, 0, targetW, targetH);
+      ctx.filter = 'contrast(2.0) brightness(1.0) grayscale(1)';
+      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, targetW, targetH);
+      thresholdImageData(ctx, targetW, targetH);
+      const thresholdBase64 = canvas.toDataURL('image/jpeg', 0.90);
+
+      stopCamera();
+      setIsAnalyzing(true);
 
       const response = await fetch('/api/ocr-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: dataUrl }),
+        body: JSON.stringify({ 
+          imageBase64: originalBase64,
+          enhancedBase64,
+          thresholdBase64
+        }),
       });
 
       if (!response.ok) {
