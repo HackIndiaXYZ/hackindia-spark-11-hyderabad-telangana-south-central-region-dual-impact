@@ -43,36 +43,14 @@ export const scanProductImage = async (
   batch?: string;
   mrp?: number;
 }> => {
-  if (!hasGeminiKey()) {
-    // Return High-fidelity Mock scanning result based on random time
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    const randomItems = [
-      { name: 'Organic Almond Milk', brand: 'Silk', category: 'Dairy', expOffset: 12, mrp: 4.99 },
-      { name: 'Fresh Blueberries', brand: 'Driscoll\'s', category: 'Fruits', expOffset: 4, mrp: 3.49 },
-      { name: 'Multivitamin Gummies', brand: 'Nature\'s Way', category: 'Supplements', expOffset: 180, mrp: 18.99 },
-      { name: 'Tomato Ketchup', brand: 'Heinz', category: 'Snacks', expOffset: 90, mrp: 2.89 },
-      { name: 'Paracetamol Tablets', brand: 'Tylenol', category: 'Medicine', expOffset: 365, mrp: 6.50 },
-    ];
-    const chosen = randomItems[Math.floor(Math.random() * randomItems.length)];
-    const expDate = new Date();
-    expDate.setDate(expDate.getDate() + chosen.expOffset);
-    
-    return {
-      name: chosen.name,
-      brand: chosen.brand,
-      expiryDate: expDate.toISOString().split('T')[0],
-      mfgDate: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString().split('T')[0],
-      barcode: Math.floor(1000000000000 + Math.random() * 9000000000000).toString(),
-      category: chosen.category,
-      confidence: Math.floor(88 + Math.random() * 11),
-      mrp: chosen.mrp,
-      batch: 'B-' + Math.random().toString(36).substr(2, 6).toUpperCase(),
-    };
+  const apiKey = getGeminiKey();
+  if (!apiKey || apiKey === 'mock-key') {
+    throw new Error('Unable to contact Gemini AI. Please configure your API key in Settings.');
   }
 
   try {
     const ai = getGeminiClient();
-    if (!ai) throw new Error('Failed to create Gemini client');
+    if (!ai) throw new Error('Unable to contact Gemini AI. Client initialization failed.');
     
     // Remove data:image/...;base64, prefix
     const base64Data = imageBase64.split(',')[1] || imageBase64;
@@ -114,8 +92,8 @@ export const scanProductImage = async (
     const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
     return JSON.parse(cleanText);
   } catch (error) {
-    console.error('Gemini OCR Error, falling back to mock:', error);
-    throw error;
+    console.error('Gemini OCR Error:', error);
+    throw new Error('Unable to contact Gemini AI.');
   }
 };
 
@@ -128,114 +106,9 @@ export const generateRecipesFromIngredients = async (
   cuisine: string,
   healthGoal: HealthMode
 ): Promise<Recipe[]> => {
-  const key = getGeminiKey();
-  
-  if (!hasGeminiKey()) {
-    // Premium Mock Recipe Generator
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-    
-    const hasMilk = availableIngredients.some(i => i.toLowerCase().includes('milk'));
-    const hasStrawberries = availableIngredients.some(i => i.toLowerCase().includes('strawberry') || i.toLowerCase().includes('strawberries'));
-    const hasAvocados = availableIngredients.some(i => i.toLowerCase().includes('avocado'));
-    const hasSpinach = availableIngredients.some(i => i.toLowerCase().includes('spinach'));
-    const hasBread = availableIngredients.some(i => i.toLowerCase().includes('bread') || i.toLowerCase().includes('sourdough'));
-
-    const mockRecipes: Recipe[] = [];
-
-    if (hasMilk && hasStrawberries) {
-      mockRecipes.push({
-        id: 'r-mock-1',
-        name: `🍓 Creamy Strawberry Milkshake (${healthGoal} Mode)`,
-        cuisine: cuisine || 'Dessert',
-        ingredients: [
-          '2 cups Fresh Strawberries (expiring soon)',
-          '1.5 cups Organic Whole Milk',
-          '2 tbsp Honey or Maple Syrup',
-          '1/2 cup Ice cubes',
-          '1/2 tsp Vanilla extract'
-        ],
-        instructions: [
-          'Wash the strawberries thoroughly and remove the green leafy hulls.',
-          'Add strawberries, cold milk, sweetener, vanilla extract, and ice into a high-speed blender.',
-          'Blend on high for 45-60 seconds until completely smooth and frothy.',
-          'Pour into tall chilled glasses and garnish with a sliced strawberry. Serve immediately!'
-        ],
-        prepTime: 5,
-        cookTime: 0,
-        calories: 180,
-        difficulty: 'Easy',
-        nutrition: { protein: 4, carbs: 28, fat: 5, fiber: 3, sugar: 22, healthScore: 85 },
-        substitutes: { 'Whole Milk': 'Almond milk, Oat milk, or Soy milk', 'Honey': 'Agave syrup or stevia for lower sugar' },
-        tips: ['Freeze your strawberries for 30 minutes beforehand for an extra thick milkshake without needing ice cream.'],
-        mistakes: ['Blending too long causes the blender motor to heat up, warming the milk and making the shake watery.'],
-        storage: 'Best consumed immediately. Can be stored in the fridge for up to 12 hours, but shake well before drinking.',
-        leftovers: 'Pour leftovers into popsicle molds and freeze for delicious Strawberry Milk Pops!',
-        isFavorite: false,
-        imageUrl: 'https://images.unsplash.com/photo-1579954115545-a95591f28bfc?w=400'
-      });
-    }
-
-    if (hasAvocados && hasBread) {
-      mockRecipes.push({
-        id: 'r-mock-2',
-        name: `🥑 Premium Avocado Toast (${healthGoal} Mode)`,
-        cuisine: cuisine || 'American',
-        ingredients: [
-          '2 slices Sourdough Bread',
-          '1 ripe Hass Avocado',
-          '1 tbsp Lemon juice',
-          'Pinch of red pepper flakes',
-          'Sea salt & black pepper to taste',
-          'Optional: Handful of Baby Spinach for topping'
-        ],
-        instructions: [
-          'Toast the sourdough bread slices to your desired level of crispiness.',
-          'Cut the avocado in half, remove the pit, and scoop the flesh into a small bowl.',
-          'Add lemon juice, sea salt, and black pepper. Mash gently with a fork, leaving some chunks for texture.',
-          'Spread the mashed avocado evenly over the warm toasted bread.',
-          'Garnish with baby spinach, red pepper flakes, and a light drizzle of olive oil. Serve immediately.'
-        ],
-        prepTime: 5,
-        cookTime: 2,
-        calories: 290,
-        difficulty: 'Easy',
-        nutrition: { protein: 7, carbs: 32, fat: 16, fiber: 8, sugar: 2, healthScore: 92 },
-        substitutes: { 'Sourdough': 'Gluten-free bread or rye bread', 'Lemon juice': 'Lime juice or apple cider vinegar' },
-        tips: ['Rub a cut garlic clove lightly over the warm toasted bread before spreading the avocado for a subtle garlicky kick.'],
-        mistakes: ['Using an underripe avocado will yield a lumpy, bitter toast. Avocados should feel slightly soft when gently squeezed.'],
-        storage: 'Avocado toast does not store well as the avocado will brown. Prepare only what you plan to eat immediately.',
-        isFavorite: false,
-        imageUrl: 'https://images.unsplash.com/photo-1541532713592-79a0317b6b77?w=400'
-      });
-    }
-
-    // Default Fallback Recipe
-    mockRecipes.push({
-      id: 'r-mock-3',
-      name: `🥗 Smart Pantry Stir-Fry (${healthGoal} Mode)`,
-      cuisine: cuisine || 'Asian',
-      ingredients: availableIngredients.length > 0 
-        ? availableIngredients.map(i => `1 cup of ${i}`)
-        : ['1 cup Mixed Vegetables (Spinach, Avocados)', '1 tbsp Olive oil', '2 tbsp Soy Sauce', '1 clove Garlic'],
-      instructions: [
-        'Prep all ingredients by washing and chopping them into uniform bite-sized pieces.',
-        'Heat olive oil in a large skillet or wok over medium-high heat.',
-        'Add minced garlic and sauté for 30 seconds until fragrant.',
-        'Add the ingredients (harder vegetables first, leafy greens like spinach at the very end). Sauté for 4-5 minutes.',
-        'Drizzle soy sauce, toss well, and cook for 1 more minute. Serve hot!'
-      ],
-      prepTime: 10,
-      cookTime: 7,
-      calories: 140,
-      difficulty: 'Easy',
-      nutrition: { protein: 3, carbs: 12, fat: 8, fiber: 4, sugar: 3, healthScore: 89 },
-      substitutes: { 'Olive oil': 'Sesame oil or coconut oil', 'Soy Sauce': 'Tamari or Coconut Aminos (low sodium)' },
-      tips: ['Make sure the wok is very hot before adding ingredients to get a quick sear without making the veggies soggy.'],
-      isFavorite: false,
-      imageUrl: 'https://images.unsplash.com/photo-1512058564366-18510be2db19?w=400'
-    });
-
-    return mockRecipes;
+  const apiKey = getGeminiKey();
+  if (!apiKey || apiKey === 'mock-key') {
+    throw new Error('Unable to contact Gemini AI. Please configure your API key in Settings.');
   }
 
   try {
@@ -312,65 +185,9 @@ export const generateDailyMealPlan = async (
     .filter((p) => p.status === 'fresh')
     .map((p) => p.name);
 
-  if (!hasGeminiKey()) {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    // Provide a beautiful mock full-day meal plan
-    return {
-      date: new Date().toISOString().split('T')[0],
-      breakfast: {
-        id: 'mp-b',
-        name: '🍳 High-Protein Avocado Scramble',
-        cuisine: 'American',
-        ingredients: ['3 Fresh Eggs', '1/2 Hass Avocado', '1 cup Baby Spinach', '1 tsp Butter', 'Salt and Pepper'],
-        instructions: ['Beat eggs in a bowl. Heat butter in a pan.', 'Sauté spinach until wilted.', 'Pour eggs and scramble gently. Top with diced avocado and seasoning.'],
-        prepTime: 5,
-        cookTime: 5,
-        calories: 380,
-        difficulty: 'Easy',
-        nutrition: { protein: 22, carbs: 6, fat: 28, fiber: 5, sugar: 1, healthScore: 90 },
-        isFavorite: false
-      },
-      lunch: {
-        id: 'mp-l',
-        name: '🥗 Warm Spinach & Salmon Salad',
-        cuisine: 'Mediterranean',
-        ingredients: ['1 Salmon fillet', '2 cups Baby Spinach', '1 tbsp Olive oil', '1 tbsp Lemon juice', '5 Cherry tomatoes'],
-        instructions: ['Pan-sear salmon fillet for 4 mins each side.', 'Toss baby spinach, cherry tomatoes, olive oil, and lemon juice in a bowl.', 'Flake salmon on top and serve.'],
-        prepTime: 8,
-        cookTime: 10,
-        calories: 450,
-        difficulty: 'Medium',
-        nutrition: { protein: 34, carbs: 8, fat: 31, fiber: 3, sugar: 2, healthScore: 95 },
-        isFavorite: false
-      },
-      dinner: {
-        id: 'mp-d',
-        name: '🍜 Simple Pantry Veggie Pasta',
-        cuisine: 'Italian',
-        ingredients: ['2 oz Whole Wheat Pasta', '1 cup Tomato Sauce', 'Mixed Veggies (Spinach, Mushrooms)', 'Parmesan Cheese'],
-        instructions: ['Boil pasta. Sauté veggies in oil.', 'Add tomato sauce to veggies, simmer for 3 mins.', 'Drain pasta, toss in sauce, top with cheese.'],
-        prepTime: 10,
-        cookTime: 12,
-        calories: 520,
-        difficulty: 'Easy',
-        nutrition: { protein: 15, carbs: 75, fat: 12, fiber: 9, sugar: 8, healthScore: 82 },
-        isFavorite: false
-      },
-      snacks: {
-        id: 'mp-s',
-        name: '🍓 Strawberry Yogurt Bowl',
-        cuisine: 'Healthy',
-        ingredients: ['1 cup Greek Yogurt', '1/2 cup Strawberries', '1 tbsp Honey', '1 tbsp Chia Seeds'],
-        instructions: ['Scoop yogurt into a bowl.', 'Top with sliced strawberries, chia seeds, and drizzle honey.'],
-        prepTime: 3,
-        cookTime: 0,
-        calories: 210,
-        difficulty: 'Easy',
-        nutrition: { protein: 18, carbs: 24, fat: 3, fiber: 4, sugar: 16, healthScore: 94 },
-        isFavorite: false
-      },
-      shoppingSuggestions: ['Cherry tomatoes', 'Parmesan Cheese', 'Chia Seeds', 'Eggs']
-    };
+  const apiKey = getGeminiKey();
+  if (!apiKey || apiKey === 'mock-key') {
+    throw new Error('Unable to contact Gemini AI. Please configure your API key in Settings.');
   }
 
   try {
