@@ -65,11 +65,22 @@ export const AiChatView: React.FC<AiChatViewProps> = ({ products }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: textToSend,
+          history: messages.map(m => ({
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: m.text }]
+          })),
           inventory: products.map(p => ({ name: p.name, expiryDate: p.expiryDate })),
         }),
       });
 
-      if (!response.ok) throw new Error('Chat API error');
+      let errorMessage = "Unable to contact Gemini AI.";
+      if (!response.ok) {
+        try {
+          const errData = await response.json();
+          if (errData.error) errorMessage = errData.error;
+        } catch (_) {}
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
       const aiMsg: ChatMessage = {
@@ -80,14 +91,14 @@ export const AiChatView: React.FC<AiChatViewProps> = ({ products }) => {
       };
 
       setMessages(prev => [...prev, aiMsg]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Chat error:', err);
       setMessages(prev => [
         ...prev,
         {
           id: `ai-err-${Date.now()}`,
           sender: 'ai',
-          text: "I'm having trouble connecting to my recipe knowledge right now. Make sure GEMINI_API_KEY is configured in Secrets!",
+          text: err.message || "Unable to contact Gemini AI.",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }
       ]);

@@ -431,73 +431,24 @@ export const chatWithKitchenAssistant = async (
   history: ChatMessage[],
   inventory: Product[]
 ): Promise<string> => {
-  const expiringList = inventory
-    .filter((p) => p.status === 'expiring' || p.status === 'expired')
-    .map((p) => `${p.name} (status: ${p.status}, expires: ${p.expiryDate})`)
-    .join(', ');
+  const response = await fetch('/api/recipe-chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      history: history.map(h => ({
+        role: h.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: h.text }]
+      })),
+      inventory: inventory.map(p => ({ name: p.name, expiryDate: p.expiryDate }))
+    })
+  });
 
-  if (!hasGeminiKey()) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    // Multi-turn simulated chatbot response
-    const msgLower = message.toLowerCase();
-    
-    if (msgLower.includes('expire') || msgLower.includes('tomorrow')) {
-      const expiringItems = inventory.filter(p => p.status === 'expiring');
-      if (expiringItems.length === 0) {
-        return "✨ Great news! You have no products expiring in the next 3 days. Your kitchen is looking fresh!";
-      }
-      return `⚠️ You have ${expiringItems.length} items expiring soon:\n` +
-        expiringItems.map(p => `• **${p.name}** in ${p.location} (expires ${p.expiryDate})`).join('\n') +
-        `\n\nI recommend making a **${expiringItems.some(i => i.category === 'Dairy') ? 'Strawberry Milkshake' : 'Stir-Fry'}** to utilize them before they spoil. Shall I generate a recipe for you?`;
-    }
-
-    if (msgLower.includes('egg') || msgLower.includes('bread') || msgLower.includes('cook')) {
-      return "🍳 Based on eggs and bread, I recommend making a **Classic French Toast** or a **Fluffy Avocado Egg Toast**.\n\nHere is a quick idea:\n1. Beat 2 eggs with a splash of milk and cinnamon.\n2. Dip sourdough bread slices in the mixture.\n3. Pan fry on medium heat for 2 minutes on each side in butter.\n4. Top with sliced banana or honey!\n\nWould you like a full nutritional breakdown or step-by-step instructions?";
-    }
-
-    if (msgLower.includes('milk') && msgLower.includes('outside')) {
-      return "🥛 **Milk Safety Tip:** Fresh pasteurized milk should not be left outside the refrigerator for more than **2 hours** (or 1 hour if the room temperature is above 90°F / 32°C).\n\nLeaving milk out allows bacteria to grow rapidly, which causes souring and can lead to foodborne illness. If you forgot milk out overnight, it is unfortunately safer to discard it.";
-    }
-
-    if (msgLower.includes('freeze') && msgLower.includes('strawberry')) {
-      return "🍓 **Yes, you can absolutely freeze strawberries!** Here's how to do it so they don't clump together:\n1. Wash and dry the berries completely (moisture causes ice crystals).\n2. Hull the green stems.\n3. Arrange them in a single layer on a parchment-lined baking sheet.\n4. Freeze for 2 hours (this is flash freezing).\n5. Transfer the solid berries into a freezer-safe bag. They will last for **10-12 months**!";
-    }
-
-    if (msgLower.includes('medicine') || msgLower.includes('safe')) {
-      return "💊 **Medicine Safety Disclaimer:** In general, it is **not recommended** to take expired medicines. Over time, active ingredients can degrade, making the drug less effective or occasionally toxic.\n\nWhile some solid pills like Ibuprofen retain potency for some time post-expiry, liquid medicines, antibiotics, and life-saving drugs (like insulin or EpiPens) should **never** be used after their expiration date. Please consult a pharmacist or discard it safely.";
-    }
-
-    return "👋 I'm your AI Smart Kitchen Assistant! I can help you find recipes, check which of your products are expiring, give kitchen safety advice, or design custom grocery lists. What would you like to cook or ask today?";
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || "Unable to contact Gemini AI.");
   }
 
-  try {
-    const ai = getGeminiClient();
-    if (!ai) throw new Error('Failed to create Gemini client');
-
-    // Build chat structure
-    const formattedHistory = history.map((h) => ({
-      role: h.sender === 'user' ? 'user' : 'model',
-      parts: [{ text: h.text }]
-    }));
-
-    const systemPrompt = `You are a helpful, professional, and knowledgeable AI Smart Kitchen Assistant.
-    You are advising the user in their kitchen.
-    Here is their current inventory of expiring or expired products: [${expiringList}].
-    Use this context when relevant to suggest recipe creations, safety warnings, and food waste reduction ideas.
-    Keep answers concise, markdown-formatted, and user-friendly. Include food prep tips or nutritional notes where helpful.`;
-
-    // Initialize model chat
-    const chat = ai.chats.create({
-      model: 'gemini-1.5-flash',
-      history: formattedHistory,
-      systemInstruction: systemPrompt
-    });
-
-    const response = await chat.sendMessage(message);
-    return response.text || 'I apologize, I could not generate a response. Please try again.';
-  } catch (error) {
-    console.error('Gemini Chat Error:', error);
-    return 'Sorry, there was an issue communicating with the AI. Please verify your Gemini API key in settings.';
-  }
+  const data = await response.json();
+  return data.response;
 };

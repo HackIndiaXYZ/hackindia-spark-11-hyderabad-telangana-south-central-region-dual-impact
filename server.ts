@@ -549,92 +549,76 @@ Make sure ingredients specify whether they come from the user's expiring invento
       const parsed = JSON.parse(response.text || '[]');
       return res.json({ recipes: parsed });
     } catch (err: any) {
-      console.warn('Error in /api/generate-recipes (falling back to mock response):', err.message);
-      // Fallback Mock Recipes
-      return res.json({ recipes: [
-        {
-          id: "rec_1",
-          title: "Paneer Butter Masala",
-          emoji: "🍛",
-          description: "A rich, creamy, and mildly sweet gravy made with butter, tomatoes, cashews, paneer, and Indian spices.",
-          difficulty: "Medium",
-          prepTime: "15 mins",
-          cookTime: "20 mins",
-          calories: 360,
-          servings: 4,
-          ingredients: [
-            { item: "Paneer", amount: "200 grams", isFromInventory: true },
-            { item: "Tomato Puree", amount: "1 cup", isFromInventory: false },
-            { item: "Butter", amount: "2 tbsp", isFromInventory: false },
-            { item: "Fresh Cream", amount: "2 tbsp", isFromInventory: false },
-            { item: "Kasuri Methi", amount: "1 tsp", isFromInventory: false },
-            { item: "Garam Masala", amount: "1 tsp", isFromInventory: false }
-          ],
-          instructions: [
-            "Heat butter in a pan and sauté tomato puree until fat separates.",
-            "Add garam masala, chili powder, and cashew paste.",
-            "Stir in 1/2 cup water, paneer cubes, and let simmer for 5 minutes.",
-            "Finish with fresh cream and kasuri methi before serving warm with chapati."
-          ],
-          nutrition: { protein: "12g", carbs: "8g", fat: "28g", fiber: "2g" },
-          tips: ["Substitute cashew paste with almond meal if needed.", "Use low-fat paneer for a healthier option."],
-          storageInstructions: "Store in an airtight container in the refrigerator for up to 2 days."
-        },
-        {
-          id: "rec_2",
-          title: "Quick Vegetable Pulao",
-          emoji: "🍚",
-          description: "A fragrant, delicious, one-pot rice dish loaded with mixed vegetables and aromatic spices.",
-          difficulty: "Easy",
-          prepTime: "10 mins",
-          cookTime: "15 mins",
-          calories: 220,
-          servings: 3,
-          ingredients: [
-            { item: "Basmati Rice", amount: "1 cup", isFromInventory: false },
-            { item: "Mixed Vegetables (Carrot, Peas, Potato)", amount: "1.5 cups", isFromInventory: true },
-            { item: "Onion (Sliced)", amount: "1 medium", isFromInventory: true },
-            { item: "Ghee", amount: "1.5 tbsp", isFromInventory: false },
-            { item: "Whole Spices (Cardamom, Cloves, Cinnamon)", amount: "1 tsp", isFromInventory: false }
-          ],
-          instructions: [
-            "Wash and soak Basmati rice for 20 minutes.",
-            "Heat ghee in a pressure cooker and splutter whole spices. Sauté sliced onions until golden.",
-            "Add vegetables and cook for 2 minutes, then add drained rice and 2 cups of water.",
-            "Pressure cook for 2 whistles. Fluff with a fork and serve with raita."
-          ],
-          nutrition: { protein: "4g", carbs: "42g", fat: "5g", fiber: "4g" },
-          tips: ["Add roasted cashews on top for extra crunch.", "Substitute Basmati with any regular rice if Basmati is unavailable."],
-          storageInstructions: "Best consumed fresh. Can be refrigerated for 24 hours."
-        }
-      ] });
+      console.warn('Error in /api/generate-recipes:', err.message);
+      return res.status(500).json({ error: "Unable to contact Gemini AI." });
     }
   });
 
   // AI Recipe Chat Endpoint
   app.post('/api/recipe-chat', async (req, res) => {
     try {
-      const { message, inventory } = req.body;
+      const { message, history = [], inventory } = req.body;
       const ai = getGeminiClient();
 
       const inventoryContext = Array.isArray(inventory) && inventory.length > 0
-        ? `User's current inventory: ${inventory.map(i => `${i.name} (${i.expiryDate})`).join(', ')}`
-        : 'User inventory available.';
+        ? `User's current inventory: ${inventory.map((i: any) => `${i.name} (${i.expiryDate})`).join(', ')}`
+        : 'User inventory is available.';
 
-      const promptText = `${inventoryContext}\nUser prompt: "${message}"\nProvide a warm, helpful chef response. If relevant, include a complete recipe structure in JSON format at the end wrapped in \`\`\`json ... \`\`\`.`;
+      const systemInstruction = `You are Chef Gemini, a friendly and professional culinary AI assistant.
+You provide expert cooking advice, detailed recipes, substitute recommendations, and zero-waste tips based on available ingredients.
 
-      const response = await ai.models.generateContent({
+Current inventory details:
+${inventoryContext}
+
+When the user asks for recipes, structure your answers clearly to include:
+- Recipe Name (with an emoji)
+- Cooking Time & Servings
+- Ingredients (clearly listing amounts)
+- Step-by-Step Cooking Instructions
+- Nutritional info (protein, carbs, fat, calories)
+- Chef Tips & Tricks
+- Storage & Food preservation advice.
+
+Answer queries like:
+- "Give me a healthy breakfast"
+- "I have paneer and spinach"
+- "I have milk expiring tomorrow"
+- "Suggest a diabetic-friendly dinner"
+- "High protein lunch"
+- "Indian recipes"
+- "Quick recipes"
+- "Recipes under 20 minutes"
+
+Be concise, warm, helpful, and maintain context using the conversation history.`;
+
+      // Build chat session with memory history
+      const chat = ai.chats.create({
         model: 'gemini-2.5-flash',
-        contents: promptText,
+        history: history,
         config: {
-          systemInstruction: 'You are Chef Gemini, a friendly culinary AI assistant. You give expert cooking advice, recipe suggestions, substitute recommendations, and zero-waste tips based on available ingredients.',
-        },
+          systemInstruction,
+        }
       });
+
+      const startTime = Date.now();
+      const response = await chat.sendMessage({ message });
+      const endTime = Date.now();
+      const responseTime = endTime - startTime;
+
+      console.log("========== RECIPE CHAT ==========");
+      console.log(`User Prompt: "${message}"`);
+      console.log("Gemini Request history count:", history.length);
+      console.log("Gemini Response:", response.text);
+      console.log("Response Time:", `${responseTime}ms`);
+      console.log("=================================");
 
       return res.json({ response: response.text });
     } catch (err: any) {
-      console.warn('Error in /api/recipe-chat (falling back to mock response):', err.message);
-      return res.json({ response: "Namaste! I am Chef Gemini. I noticed my connection to the AI engine is currently using simulated mode, but I can still tell you that Paneer Butter Masala or Veg Pulao would be an excellent way to use your expiring ingredients. Let me know if you would like me to show you the cooking steps!" });
+      console.error("========== RECIPE CHAT ERROR ==========");
+      console.error("Error message:", err.message);
+      console.error("Full error:", err);
+      console.error("=======================================");
+      return res.status(500).json({ error: "Unable to contact Gemini AI." });
     }
   });
 
