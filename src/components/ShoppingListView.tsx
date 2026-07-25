@@ -39,7 +39,7 @@ interface ShoppingListViewProps {
 export const ShoppingListView: React.FC<ShoppingListViewProps> = ({
   items,
   products,
-  currency = '$',
+  currency = '₹',
   onAddItem,
   onUpdateItem,
   onDeleteItem,

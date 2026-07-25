@@ -29,7 +29,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
       count: total,
       subtext: fresh > 0 ? `${fresh} fresh items stored` : 'Inventory summary',
       icon: Package,
-      borderClass: 'border-[#E2E4E9]',
+      borderClass: 'border-[#E2E4E9] dark:border-slate-800',
       subtextClass: 'text-teal-600 dark:text-teal-400',
     },
     {
@@ -38,7 +38,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
       count: fresh,
       subtext: total > 0 ? `${Math.round((fresh / total) * 100) || 0}% of pantry fresh` : 'No items yet',
       icon: CheckCircle2,
-      borderClass: 'border-[#E2E4E9]',
+      borderClass: 'border-[#E2E4E9] dark:border-slate-800 border-t-4 border-t-green-500',
       subtextClass: 'text-green-600 dark:text-green-400',
     },
     {
@@ -47,7 +47,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
       count: expiringSoon,
       subtext: expiringSoon > 0 ? `${expiringSoon} items within 7 days` : '0 items expiring',
       icon: Clock,
-      borderClass: 'border-[#E2E4E9] border-l-4 border-l-orange-400',
+      borderClass: 'border-[#E2E4E9] dark:border-slate-800 border-t-4 border-t-yellow-500',
       subtextClass: 'text-orange-600 dark:text-orange-400',
     },
     {
@@ -56,7 +56,7 @@ export const DashboardStats: React.FC<DashboardStatsProps> = ({
       count: expired,
       subtext: expired > 0 ? 'Requires attention' : 'Zero expired items',
       icon: AlertTriangle,
-      borderClass: 'border-[#E2E4E9]',
+      borderClass: 'border-[#E2E4E9] dark:border-slate-800 border-t-4 border-t-red-500',
       subtextClass: 'text-red-500 dark:text-red-400',
     },
   ];

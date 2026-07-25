@@ -35,7 +35,9 @@ import {
   savePreferences, 
   getInitialDemoData,
   loadShoppingItems,
-  saveShoppingItems
+  saveShoppingItems,
+  loadUser,
+  saveUser
 } from './utils/storage';
 import { 
   getExpiryStatus, 
@@ -46,12 +48,23 @@ import {
   generateExpiryNotifications, 
   requestNotificationPermission 
 } from './services/notificationService';
+import { 
+  syncProducts,
+  syncShoppingItems,
+  dbAddProduct,
+  dbUpdateProduct,
+  dbDeleteProduct,
+  dbAddShoppingItem,
+  dbUpdateShoppingItem,
+  dbDeleteShoppingItem,
+  mergeLocalDataToFirestore
+} from './services/dbService';
+import { isConfigured } from './services/firebase';
 import { Plus, Filter, Calendar, Sparkles, SlidersHorizontal, Trash2, Mic } from 'lucide-react';
 
 export function App() {
   // App views
   const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'scan' | 'manual' | 'shopping' | 'recipes' | 'chat' | 'analytics' | 'settings'>('dashboard');
-
 
   // Scanning method sub-views: 'select' | 'camera' | 'upload' | 'barcode'
   const [scanMethod, setScanMethod] = useState<'select' | 'camera' | 'upload' | 'barcode'>('select');
@@ -59,18 +72,13 @@ export function App() {
   // Core domain data
   const [products, setProducts] = useState<Product[]>([]);
   const [shoppingItems, setShoppingItems] = useState<ShoppingItem[]>([]);
-  const [user, setUser] = useState<User>({
-    uid: 'guest_123',
-    email: 'guest@smartexpiry.ai',
-    displayName: 'Guest User',
-    isGuest: true,
-  });
+  const [user, setUser] = useState<User>(() => loadUser());
   const [preferences, setPreferences] = useState<UserPreferences>({
     theme: 'light',
     enableBrowserNotifications: true,
     reminderDays: [7, 3, 2, 1, 0],
     dietaryPreference: 'None',
-    currency: '$',
+    currency: '₹',
   });
 
   // UI States
@@ -99,17 +107,10 @@ export function App() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // Initialize Data
+  // Initialize Preferences & Theme
   useEffect(() => {
-    const loadedProds = loadProducts();
-    setProducts(loadedProds);
-
-    const loadedShop = loadShoppingItems();
-    setShoppingItems(loadedShop);
-
     const loadedPrefs = loadPreferences();
     setPreferences(loadedPrefs);
-
 
     // Apply dark/light theme class to document element
     if (loadedPrefs.theme === 'dark') {
@@ -118,15 +119,60 @@ export function App() {
       document.documentElement.classList.remove('dark');
     }
 
-    // Check notifications
-    const alerts = generateExpiryNotifications(loadedProds, loadedPrefs.reminderDays);
-    setNotifications(alerts);
-
     // Request browser notification permission if enabled
     if (loadedPrefs.enableBrowserNotifications) {
       requestNotificationPermission();
     }
   }, []);
+
+  // Real-time Firestore Sync (or Local Storage fallbacks)
+  useEffect(() => {
+    if (user.isGuest || !isConfigured) {
+      // Load offline local storage products & shopping items
+      const loadedProds = loadProducts();
+      setProducts(loadedProds);
+
+      const loadedShop = loadShoppingItems();
+      setShoppingItems(loadedShop);
+      return;
+    }
+
+    // Subscribe to real-time products updates
+    const unsubscribeProducts = syncProducts(user.uid, (firestoreProducts) => {
+      setProducts(firestoreProducts);
+      saveProducts(firestoreProducts); // Sync local cache
+    });
+
+    // Subscribe to real-time shopping items updates
+    const unsubscribeShopping = syncShoppingItems(user.uid, (firestoreItems) => {
+      setShoppingItems(firestoreItems);
+      saveShoppingItems(firestoreItems); // Sync local cache
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeShopping();
+    };
+  }, [user.uid]);
+
+  // Keep Notifications synchronized with current active products
+  useEffect(() => {
+    const alerts = generateExpiryNotifications(products, preferences.reminderDays);
+    setNotifications(alerts);
+  }, [products, preferences.reminderDays]);
+
+  // Handle Login & Session Merge
+  const handleLogin = async (loggedUser: User) => {
+    setUser(loggedUser);
+    saveUser(loggedUser);
+
+    if (!loggedUser.isGuest && isConfigured) {
+      // Merge current offline cache items into Firestore
+      const localProducts = loadProducts();
+      const localShopping = loadShoppingItems();
+      await mergeLocalDataToFirestore(loggedUser.uid, localProducts, localShopping);
+    }
+  };
 
   // Sync theme changes
   const handleUpdatePreferences = (newPrefs: UserPreferences) => {
@@ -141,16 +187,27 @@ export function App() {
   };
 
   // Product CRUD
-  const handleSaveProduct = (pPartial: Partial<Product>) => {
-    let updated: Product[];
+  const handleSaveProduct = async (pPartial: Partial<Product>) => {
+    let updatedProduct: Product;
+    const targetId = productToEdit?.id || pPartial.id;
 
-    if (productToEdit) {
+    if (targetId) {
       // Edit existing
-      updated = products.map(p => p.id === productToEdit.id ? { ...p, ...pPartial } as Product : p);
+      const existing = products.find(p => p.id === targetId);
+      if (existing) {
+        updatedProduct = { ...existing, ...pPartial, updatedAt: new Date().toISOString() } as Product;
+        if (!user.isGuest && isConfigured) {
+          await dbUpdateProduct(user.uid, targetId, pPartial);
+        } else {
+          const updated = products.map(p => p.id === targetId ? updatedProduct : p);
+          setProducts(updated);
+          saveProducts(updated);
+        }
+      }
       setProductToEdit(null);
     } else {
       // Create new
-      const newProduct: Product = {
+      updatedProduct = {
         id: `prod_${Date.now()}`,
         name: pPartial.name || 'Unnamed Item',
         category: (pPartial.category as ProductCategory) || 'Other',
@@ -172,15 +229,14 @@ export function App() {
         batchNumber: pPartial.batchNumber,
         mrp: pPartial.mrp,
       };
-      updated = [newProduct, ...products];
+      if (!user.isGuest && isConfigured) {
+        await dbAddProduct(user.uid, updatedProduct);
+      } else {
+        const updated = [updatedProduct, ...products];
+        setProducts(updated);
+        saveProducts(updated);
+      }
     }
-
-    setProducts(updated);
-    saveProducts(updated);
-
-    // Refresh notifications
-    const freshAlerts = generateExpiryNotifications(updated, preferences.reminderDays);
-    setNotifications(freshAlerts);
 
     // Navigate to dashboard or products list
     setActiveTab('products');
@@ -188,7 +244,7 @@ export function App() {
   };
 
   // Shopping List Handlers
-  const handleAddShoppingItem = (itemPartial: Omit<ShoppingItem, 'id' | 'createdAt' | 'isPurchased'>) => {
+  const handleAddShoppingItem = async (itemPartial: Omit<ShoppingItem, 'id' | 'createdAt' | 'isPurchased'>) => {
     const newItem: ShoppingItem = {
       id: `shop_${Date.now()}`,
       name: itemPartial.name,
@@ -203,36 +259,61 @@ export function App() {
       createdAt: new Date().toISOString(),
       reason: itemPartial.reason || 'Manual entry',
     };
-    const updated = [newItem, ...shoppingItems];
-    setShoppingItems(updated);
-    saveShoppingItems(updated);
+
+    if (!user.isGuest && isConfigured) {
+      await dbAddShoppingItem(user.uid, newItem);
+    } else {
+      const updated = [newItem, ...shoppingItems];
+      setShoppingItems(updated);
+      saveShoppingItems(updated);
+    }
   };
 
-  const handleUpdateShoppingItem = (id: string, updates: Partial<ShoppingItem>) => {
-    const updated = shoppingItems.map(item => item.id === id ? { ...item, ...updates } : item);
-    setShoppingItems(updated);
-    saveShoppingItems(updated);
+  const handleUpdateShoppingItem = async (id: string, updates: Partial<ShoppingItem>) => {
+    if (!user.isGuest && isConfigured) {
+      await dbUpdateShoppingItem(user.uid, id, updates);
+    } else {
+      const updated = shoppingItems.map(item => item.id === id ? { ...item, ...updates } : item);
+      setShoppingItems(updated);
+      saveShoppingItems(updated);
+    }
   };
 
-  const handleDeleteShoppingItem = (id: string) => {
-    const updated = shoppingItems.filter(item => item.id !== id);
-    setShoppingItems(updated);
-    saveShoppingItems(updated);
+  const handleDeleteShoppingItem = async (id: string) => {
+    if (!user.isGuest && isConfigured) {
+      await dbDeleteShoppingItem(user.uid, id);
+    } else {
+      const updated = shoppingItems.filter(item => item.id !== id);
+      setShoppingItems(updated);
+      saveShoppingItems(updated);
+    }
   };
 
-  const handleToggleShoppingPurchased = (id: string) => {
-    const updated = shoppingItems.map(item => {
-      if (item.id === id) {
-        return {
-          ...item,
-          isPurchased: !item.isPurchased,
-          purchasedAt: !item.isPurchased ? new Date().toISOString() : undefined,
-        };
-      }
-      return item;
-    });
-    setShoppingItems(updated);
-    saveShoppingItems(updated);
+  const handleToggleShoppingPurchased = async (id: string) => {
+    const target = shoppingItems.find(item => item.id === id);
+    if (!target) return;
+
+    const nextPurchasedState = !target.isPurchased;
+    const updates = {
+      isPurchased: nextPurchasedState,
+      purchasedAt: nextPurchasedState ? new Date().toISOString() : undefined,
+    };
+
+    if (!user.isGuest && isConfigured) {
+      await dbUpdateShoppingItem(user.uid, id, updates);
+    } else {
+      const updated = shoppingItems.map(item => {
+        if (item.id === id) {
+          return {
+            ...item,
+            ...updates,
+          };
+        }
+        return item;
+      });
+      setShoppingItems(updated);
+      saveShoppingItems(updated);
+    }
   };
 
   const handleAddToPantryFromShopping = (item: ShoppingItem) => {
@@ -250,11 +331,16 @@ export function App() {
     });
   };
 
-  const handleDeleteProduct = (id: string) => {
+  const handleDeleteProduct = async (id: string) => {
     const target = products.find(p => p.id === id);
-    const updated = products.filter(p => p.id !== id);
-    setProducts(updated);
-    saveProducts(updated);
+
+    if (!user.isGuest && isConfigured) {
+      await dbDeleteProduct(user.uid, id);
+    } else {
+      const updated = products.filter(p => p.id !== id);
+      setProducts(updated);
+      saveProducts(updated);
+    }
 
     if (target) {
       setPromptShoppingItem({
@@ -266,11 +352,17 @@ export function App() {
     }
   };
 
-  const handleMarkUsed = (id: string) => {
+  const handleMarkUsed = async (id: string) => {
     const target = products.find(p => p.id === id);
-    const updated = products.map(p => p.id === id ? { ...p, isUsed: true, usedAt: new Date().toISOString() } : p);
-    setProducts(updated);
-    saveProducts(updated);
+    const updates = { isUsed: true, usedAt: new Date().toISOString() };
+
+    if (!user.isGuest && isConfigured) {
+      await dbUpdateProduct(user.uid, id, updates);
+    } else {
+      const updated = products.map(p => p.id === id ? { ...p, ...updates } : p);
+      setProducts(updated);
+      saveProducts(updated);
+    }
 
     if (target) {
       setPromptShoppingItem({
@@ -291,6 +383,53 @@ export function App() {
     return false;
   };
 
+  // --- Voice Assistant Dedicated NLU Operations ---
+  const handleMarkProductUsedByName = (name: string): boolean => {
+    const match = products.find(p => p.name.toLowerCase().includes(name.toLowerCase()) && !p.isUsed);
+    if (match) {
+      handleMarkUsed(match.id);
+      return true;
+    }
+    return false;
+  };
+
+  const handleUpdateProductByName = (name: string, updates: Partial<Product>): boolean => {
+    const match = products.find(p => p.name.toLowerCase().includes(name.toLowerCase()));
+    if (match) {
+      handleSaveProduct({ id: match.id, ...updates });
+      return true;
+    }
+    return false;
+  };
+
+  const handleUpdateShoppingItemByName = (name: string, updates: Partial<ShoppingItem>): boolean => {
+    const match = shoppingItems.find(item => item.name.toLowerCase().includes(name.toLowerCase()));
+    if (match) {
+      handleUpdateShoppingItem(match.id, updates);
+      return true;
+    }
+    return false;
+  };
+
+  const handleDeleteShoppingItemByName = (name: string): boolean => {
+    const match = shoppingItems.find(item => item.name.toLowerCase().includes(name.toLowerCase()));
+    if (match) {
+      handleDeleteShoppingItem(match.id);
+      return true;
+    }
+    return false;
+  };
+
+  const handleClearShoppingList = async () => {
+    if (!user.isGuest && isConfigured) {
+      for (const item of shoppingItems) {
+        await dbDeleteShoppingItem(user.uid, item.id);
+      }
+    } else {
+      setShoppingItems([]);
+      saveShoppingItems([]);
+    }
+  };
 
   const handleToggleBookmarkRecipe = (recipe: Recipe) => {
     if (bookmarkedRecipes.some(r => r.id === recipe.id)) {
@@ -300,12 +439,19 @@ export function App() {
     }
   };
 
-  const handleResetData = () => {
+  const handleResetData = async () => {
     const demoData = getInitialDemoData();
-    setProducts(demoData);
-    saveProducts(demoData);
-    const freshAlerts = generateExpiryNotifications(demoData, preferences.reminderDays);
-    setNotifications(freshAlerts);
+    if (!user.isGuest && isConfigured) {
+      for (const p of products) {
+        await dbDeleteProduct(user.uid, p.id);
+      }
+      for (const p of demoData) {
+        await dbAddProduct(user.uid, p);
+      }
+    } else {
+      setProducts(demoData);
+      saveProducts(demoData);
+    }
   };
 
   // Notification Mark Read
@@ -315,20 +461,12 @@ export function App() {
 
   // Filtered and Sorted Products
   const filteredProducts = products.filter(p => {
-    // Search query match
     const q = searchQuery.toLowerCase();
     const matchesSearch = !q || p.name.toLowerCase().includes(q) || (p.brand && p.brand.toLowerCase().includes(q)) || p.category.toLowerCase().includes(q);
-
-    // Category match
     const matchesCat = selectedCategory === 'All' || p.category === selectedCategory;
-
-    // Location match
     const matchesLoc = selectedLocation === 'All' || p.location === selectedLocation;
-
-    // Status match
     const status = getExpiryStatus(p.expiryDate);
     const matchesStatus = selectedStatus === 'All' || status === selectedStatus;
-
     return matchesSearch && matchesCat && matchesLoc && matchesStatus;
   }).sort((a, b) => {
     if (sortBy === 'expiryAsc') return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
@@ -339,11 +477,11 @@ export function App() {
 
   // Calculate stats counts
   const totalCount = products.length;
-  const freshCount = products.filter(p => !p.isUsed && getExpiryStatus(p.expiryDate) === 'Fresh').length;
-  const expiringSoonCount = products.filter(p => !p.isUsed && getExpiryStatus(p.expiryDate) === 'Expiring Soon').length;
-  const expiredCount = products.filter(p => !p.isUsed && getExpiryStatus(p.expiryDate) === 'Expired').length;
+  const freshCount = products.filter(p => getExpiryStatus(p.expiryDate) === 'Fresh').length;
+  const expiringSoonCount = products.filter(p => getExpiryStatus(p.expiryDate) === 'Expiring Soon').length;
+  const expiredCount = products.filter(p => getExpiryStatus(p.expiryDate) === 'Expired').length;
   const usedProductsCount = products.filter(p => p.isUsed).length;
-  const moneySaved = products.filter(p => p.isUsed).reduce((acc, p) => acc + (p.price || 3.5) * p.quantity, 0);
+  const moneySaved = products.filter(p => p.isUsed).reduce((acc, p) => acc + (p.price || 75.0) * p.quantity, 0); // ₹75 default INR price
 
   return (
     <div className="min-h-screen bg-[#F8F9FB] dark:bg-slate-950 text-[#1A1C1E] dark:text-slate-100 flex transition-colors font-sans">
@@ -377,12 +515,14 @@ export function App() {
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           onLogout={() => {
-            setUser({
+            const guestUser = {
               uid: 'guest_123',
               email: 'guest@smartexpiry.ai',
               displayName: 'Guest User',
               isGuest: true,
-            });
+            };
+            setUser(guestUser);
+            saveUser(guestUser);
           }}
         />
 
@@ -401,7 +541,7 @@ export function App() {
                 expired={expiredCount}
                 selectedStatusFilter={selectedStatus}
                 onSelectStatusFilter={(st) => setSelectedStatus(st)}
-                currency={preferences.currency || '$'}
+                currency={preferences.currency || '₹'}
                 moneySaved={moneySaved}
               />
 
@@ -589,7 +729,7 @@ export function App() {
             <ShoppingListView
               items={shoppingItems}
               products={products}
-              currency={preferences.currency || '$'}
+              currency={preferences.currency || '₹'}
               onAddItem={handleAddShoppingItem}
               onUpdateItem={handleUpdateShoppingItem}
               onDeleteItem={handleDeleteShoppingItem}
@@ -617,8 +757,8 @@ export function App() {
           {/* VIEW 7: ANALYTICS */}
           {activeTab === 'analytics' && (
             <AnalyticsView
-              products={products}
-              currency={preferences.currency || '$'}
+              products={filteredProducts}
+              currency={preferences.currency || '₹'}
             />
           )}
 
@@ -673,6 +813,11 @@ export function App() {
         onAddProduct={handleSaveProduct}
         onAddShoppingItem={handleAddShoppingItem}
         onDeleteProductByName={handleDeleteProductByName}
+        onMarkProductUsedByName={handleMarkProductUsedByName}
+        onUpdateProductByName={handleUpdateProductByName}
+        onUpdateShoppingItemByName={handleUpdateShoppingItemByName}
+        onDeleteShoppingItemByName={handleDeleteShoppingItemByName}
+        onClearShoppingList={handleClearShoppingList}
         onNavigateTab={(tab) => {
           setActiveTab(tab);
           if (tab === 'scan') setScanMethod('select');
@@ -705,7 +850,7 @@ export function App() {
         <AuthModal
           onClose={() => setShowAuthModal(false)}
           user={user}
-          onLogin={(loggedUser) => setUser(loggedUser)}
+          onLogin={handleLogin}
         />
       )}
 

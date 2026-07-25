@@ -27,6 +27,11 @@ interface VoiceAssistantModalProps {
   onAddProduct: (prodPartial: Partial<Product>) => void;
   onAddShoppingItem: (itemPartial: Omit<ShoppingItem, 'id' | 'createdAt' | 'isPurchased'>) => void;
   onDeleteProductByName: (name: string) => boolean;
+  onMarkProductUsedByName: (name: string) => boolean;
+  onUpdateProductByName: (name: string, updates: Partial<Product>) => boolean;
+  onUpdateShoppingItemByName: (name: string, updates: Partial<ShoppingItem>) => boolean;
+  onDeleteShoppingItemByName: (name: string) => boolean;
+  onClearShoppingList: () => void;
   onNavigateTab: (tab: 'dashboard' | 'products' | 'scan' | 'manual' | 'shopping' | 'recipes' | 'chat' | 'analytics' | 'settings') => void;
   onGenerateRecipeWithIngredients: (ingredients: string[]) => void;
 }
@@ -55,6 +60,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   onAddProduct,
   onAddShoppingItem,
   onDeleteProductByName,
+  onMarkProductUsedByName,
+  onUpdateProductByName,
+  onUpdateShoppingItemByName,
+  onDeleteShoppingItemByName,
+  onClearShoppingList,
   onNavigateTab,
   onGenerateRecipeWithIngredients,
 }) => {
@@ -62,7 +72,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     {
       id: 'm0',
       sender: 'assistant',
-      text: "Hello! I'm your Smart Pantry & Voice Assistant. How can I help you today? You can speak or type commands like 'Add milk expiring on July 30' or 'What can I cook today?'",
+      text: "Namaste! I'm your Smart Pantry AI Voice Assistant. How can I help you manage your kitchen today? Try saying 'Add milk expiring on July 30' or 'Open shopping list'.",
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -81,160 +91,171 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isThinking]);
 
-  // Speech Recognition Setup
+  // Initialize Speech Recognition
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.lang = 'en-IN'; // Indian English localization
 
-      recognition.onstart = () => {
+      rec.onstart = () => {
         setIsListening(true);
       };
 
-      recognition.onresult = (event: any) => {
+      rec.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
-        setIsListening(false);
         handleUserQuery(transcript);
       };
 
-      recognition.onerror = () => {
+      rec.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
         setIsListening(false);
       };
 
-      recognition.onend = () => {
+      rec.onend = () => {
         setIsListening(false);
       };
 
-      recognitionRef.current = recognition;
+      recognitionRef.current = rec;
     }
   }, []);
 
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      try {
-        recognitionRef.current?.start();
-        setIsListening(true);
-      } catch (err) {
-        console.error('Speech recognition error:', err);
-        setIsListening(false);
-      }
-    }
-  };
-
-  // Text-To-Speech Output
+  // Text-To-Speech function
   const speakText = (text: string) => {
-    if (isMuted || !('speechSynthesis' in window)) return;
+    if (isMuted) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
+    utterance.lang = 'en-IN'; // Indian voice accent
     window.speechSynthesis.speak(utterance);
   };
 
-  // Auto category inference
+  const toggleListening = () => {
+    if (!recognitionRef.current) {
+      alert("Browser speech recognition is not supported in this browser. Please type your query!");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
+    }
+  };
+
   const inferCategory = (name: string): ProductCategory => {
-    const lower = name.toLowerCase();
-    if (lower.includes('milk') || lower.includes('yogurt') || lower.includes('cheese') || lower.includes('butter') || lower.includes('cream')) return 'Dairy';
-    if (lower.includes('paracetamol') || lower.includes('aspirin') || lower.includes('syrup') || lower.includes('pill') || lower.includes('medicine') || lower.includes('tablet')) return 'Medicine';
-    if (lower.includes('apple') || lower.includes('banana') || lower.includes('strawberry') || lower.includes('orange') || lower.includes('grape') || lower.includes('berry')) return 'Fruits';
-    if (lower.includes('spinach') || lower.includes('tomato') || lower.includes('potato') || lower.includes('onion') || lower.includes('carrot') || lower.includes('vegetable')) return 'Vegetables';
-    if (lower.includes('bread') || lower.includes('bun') || lower.includes('croissant') || lower.includes('pastry') || lower.includes('cake')) return 'Bakery';
-    if (lower.includes('chip') || lower.includes('biscuit') || lower.includes('cookie') || lower.includes('snack') || lower.includes('nut')) return 'Snacks';
-    if (lower.includes('soda') || lower.includes('juice') || lower.includes('drink') || lower.includes('coke') || lower.includes('water')) return 'Beverages';
-    if (lower.includes('frozen') || lower.includes('peas') || lower.includes('ice cream')) return 'Frozen Food';
+    const n = name.toLowerCase();
+    if (n.includes('milk') || n.includes('paneer') || n.includes('cheese') || n.includes('butter') || n.includes('curd') || n.includes('yogurt') || n.includes('ghee')) return 'Dairy';
+    if (n.includes('crocin') || n.includes('paracetamol') || n.includes('cough') || n.includes('pill') || n.includes('tablet') || n.includes('capsule') || n.includes('syrup')) return 'Medicine';
+    if (n.includes('tomato') || n.includes('onion') || n.includes('potato') || n.includes('garlic') || n.includes('ginger') || n.includes('spinach') || n.includes('chili')) return 'Vegetables';
+    if (n.includes('apple') || n.includes('banana') || n.includes('mango') || n.includes('grape') || n.includes('orange') || n.includes('berry')) return 'Fruits';
+    if (n.includes('bread') || n.includes('bun') || n.includes('toast') || n.includes('roti') || n.includes('naan')) return 'Bakery';
+    if (n.includes('biscuit') || n.includes('cookie') || n.includes('chip') || n.includes('kurkure') || n.includes('maggi') || n.includes('noodle')) return 'Snacks';
+    if (n.includes('coke') || n.includes('pepsi') || n.includes('juice') || n.includes('water') || n.includes('tea') || n.includes('coffee')) return 'Beverages';
     return 'Other';
   };
 
-  // Date Parser Helper for natural phrases
   const parseNaturalDate = (text: string): string | null => {
-    const lower = text.toLowerCase();
+    const clean = text.toLowerCase();
     const today = new Date();
-
-    if (lower.includes('today')) {
+    
+    // Check for DD/MM/YYYY or DD-MM-YYYY
+    const digitalMatch = clean.match(/(\d{1,2})[\/\-](\d{1,2})([\/\-](\d{4}))?/);
+    if (digitalMatch) {
+      const day = parseInt(digitalMatch[1]);
+      const month = parseInt(digitalMatch[2]) - 1;
+      const year = digitalMatch[4] ? parseInt(digitalMatch[4]) : today.getFullYear();
+      const dObj = new Date(year, month, day);
+      if (!isNaN(dObj.getTime())) {
+        return dObj.toISOString().split('T')[0];
+      }
+    }
+    
+    if (clean.includes('today')) {
       return today.toISOString().split('T')[0];
     }
-    if (lower.includes('tomorrow')) {
+    if (clean.includes('tomorrow')) {
       const tomorrow = new Date(today);
-      tomorrow.setDate(today.getDate() + 1);
+      tomorrow.setDate(tomorrow.getDate() + 1);
       return tomorrow.toISOString().split('T')[0];
     }
-    if (lower.includes('yesterday')) {
-      const yest = new Date(today);
-      yest.setDate(today.getDate() - 1);
-      return yest.toISOString().split('T')[0];
-    }
-    if (lower.includes('next week') || lower.includes('in a week')) {
-      const nextWk = new Date(today);
-      nextWk.setDate(today.getDate() + 7);
-      return nextWk.toISOString().split('T')[0];
+    if (clean.includes('yesterday')) {
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return yesterday.toISOString().split('T')[0];
     }
 
-    // Try parsing "July 30", "December 10", "10/12/2026", "2026-08-15"
-    const months: { [key: string]: number } = {
-      january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3,
-      may: 4, june: 5, jun: 5, july: 6, jul: 6, august: 7, aug: 7, september: 8, sep: 8, sept: 8,
-      october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11
-    };
-
-    for (const [mName, mIdx] of Object.entries(months)) {
-      if (lower.includes(mName)) {
-        const dayMatch = lower.match(new RegExp(`${mName}\\s+(\\d{1,2})`)) || lower.match(new RegExp(`(\\d{1,2})\\s+${mName}`));
-        if (dayMatch) {
-          const day = parseInt(dayMatch[1]);
-          const year = today.getFullYear();
-          const target = new Date(year, mIdx, day);
-          if (target < today) target.setFullYear(year + 1);
-          return target.toISOString().split('T')[0];
-        }
+    // Check month name matches
+    const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december', 'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    let monthIndex = -1;
+    for (let i = 0; i < months.length; i++) {
+      if (clean.includes(months[i])) {
+        monthIndex = i % 12;
+        break;
       }
     }
 
-    // YYYY-MM-DD match
-    const dateMatch = lower.match(/\b\d{4}-\d{2}-\d{2}\b/);
-    if (dateMatch) return dateMatch[0];
+    if (monthIndex !== -1) {
+      const numbers = clean.match(/\d+/g) || [];
+      let day = 1;
+      let year = today.getFullYear();
+      for (const numStr of numbers) {
+        if (numStr.length === 4) {
+          year = parseInt(numStr);
+        } else if (numStr.length === 1 || numStr.length === 2) {
+          day = parseInt(numStr);
+        }
+      }
+      const dObj = new Date(year, monthIndex, day);
+      if (!isNaN(dObj.getTime())) {
+        return dObj.toISOString().split('T')[0];
+      }
+    }
 
     return null;
   };
 
-  // Quantity Parser Helper
   const parseQuantity = (text: string): { qty: number; unit: string } => {
-    const lower = text.toLowerCase();
-    const wordNums: { [key: string]: number } = {
-      one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-      a: 1, an: 1, pair: 2, dozen: 12
+    const clean = text.toLowerCase();
+    const numberWords: Record<string, number> = {
+      'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
     };
 
-    for (const [word, val] of Object.entries(wordNums)) {
-      if (new RegExp(`\\b${word}\\b`).test(lower)) {
-        let unit = 'pcs';
-        if (lower.includes('packet') || lower.includes('pack')) unit = 'pack';
-        if (lower.includes('liter') || lower.includes('litre') || lower.includes('l')) unit = 'L';
-        if (lower.includes('kg') || lower.includes('kilo')) unit = 'kg';
-        if (lower.includes('bottle')) unit = 'bottle';
-        return { qty: val, unit };
+    let qty = 1;
+    let unit = 'pcs';
+
+    // Try finding digit matches
+    const digitMatch = clean.match(/\b\d+\b/);
+    if (digitMatch) {
+      qty = parseInt(digitMatch[0]);
+    } else {
+      // Try word matches
+      for (const word in numberWords) {
+        if (clean.includes(word)) {
+          qty = numberWords[word];
+          break;
+        }
       }
     }
 
-    const numMatch = lower.match(/(\d+)\s*(packets?|packs?|kg|liters?|litres?|bottles?|pcs)?/);
-    if (numMatch) {
-      const qty = parseInt(numMatch[1]);
-      let unit = numMatch[2] || 'pcs';
-      if (unit.startsWith('pack')) unit = 'pack';
-      if (unit.startsWith('liter') || unit.startsWith('litre')) unit = 'L';
-      return { qty, unit };
+    // Try finding unit matches
+    const units = ['packet', 'pack', 'kg', 'gram', 'litre', 'liter', 'ml', 'pcs', 'bottle', 'strip'];
+    for (const u of units) {
+      if (clean.includes(u)) {
+        unit = u;
+        if (qty > 1 && !u.endsWith('s') && u === 'packet') {
+          unit = 'packets';
+        }
+        break;
+      }
     }
 
-    return { qty: 1, unit: 'pcs' };
+    return { qty, unit };
   };
 
   // Core Natural Language Parser & Action Executor
-  const handleUserQuery = (query: string) => {
+  const handleUserQuery = async (query: string) => {
     if (!query.trim()) return;
 
     const userMsg: Message = {
@@ -248,12 +269,127 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     setInputQuery('');
     setIsThinking(true);
 
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/voice-assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: query,
+          context: context,
+          inventory: products.map(p => ({
+            name: p.name,
+            category: p.category,
+            expiryDate: p.expiryDate,
+            location: p.location
+          }))
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('API server returned error');
+      }
+
+      const data = await response.json();
+      const intent = data.intent;
+      const extracted = data.extractedData || {};
+      const missing = data.missingFields || [];
+      let finalReplyText = data.reply;
+      const navTab = data.navigationTab;
+
+      let actionText = '';
+
+      if (intent === 'add_product') {
+        if (missing.length > 0) {
+          setContext({
+            pendingAction: 'add_product',
+            ...extracted
+          });
+        } else {
+          onAddProduct({
+            name: extracted.productName,
+            expiryDate: extracted.expiryDate,
+            quantity: extracted.quantity || 1,
+            unit: extracted.unit || 'pcs',
+            category: extracted.category || inferCategory(extracted.productName),
+            location: extracted.location || 'Kitchen',
+            brand: extracted.brand || undefined,
+            notes: extracted.notes || undefined,
+            source: 'Manual'
+          });
+          setContext({});
+          actionText = `Added ${extracted.productName} to pantry`;
+          finalReplyText = `Product is added. Product added successfully. ${finalReplyText}`;
+        }
+      } else if (intent === 'add_shopping') {
+        if (missing.length > 0) {
+          setContext({
+            pendingAction: 'add_shopping',
+            ...extracted
+          });
+        } else {
+          onAddShoppingItem({
+            name: extracted.productName,
+            category: extracted.category || inferCategory(extracted.productName),
+            quantity: extracted.quantity || 1,
+            unit: extracted.unit || 'pcs',
+            priority: 'Medium',
+            notes: extracted.notes || undefined,
+            reason: 'Voice Command'
+          });
+          setContext({});
+          actionText = `Added ${extracted.productName} to shopping list`;
+        }
+      } else if (intent === 'delete_product') {
+        if (query.toLowerCase().includes('used') || query.toLowerCase().includes('finished') || query.toLowerCase().includes('done')) {
+          const success = onMarkProductUsedByName(extracted.productName || query);
+          actionText = success ? `Marked ${extracted.productName} as used` : 'Mark used failed';
+        } else {
+          const success = onDeleteProductByName(extracted.productName || query);
+          actionText = success ? `Deleted ${extracted.productName}` : 'Delete failed';
+        }
+        setContext({});
+      } else if (intent === 'edit_product') {
+        const updates: Partial<Product> = {};
+        if (extracted.expiryDate) updates.expiryDate = extracted.expiryDate;
+        if (extracted.quantity) updates.quantity = extracted.quantity;
+        const success = onUpdateProductByName(extracted.productName || query, updates);
+        actionText = success ? `Updated ${extracted.productName}` : 'Update failed';
+        setContext({});
+      } else if (intent === 'shopping_list_ops') {
+        if (query.toLowerCase().includes('clear') || query.toLowerCase().includes('reset')) {
+          onClearShoppingList();
+          actionText = 'Cleared shopping list';
+        } else if (query.toLowerCase().includes('remove') || query.toLowerCase().includes('delete')) {
+          const success = onDeleteShoppingItemByName(extracted.productName || query);
+          actionText = success ? `Removed ${extracted.productName} from shopping` : 'Remove failed';
+        } else if (query.toLowerCase().includes('purchase') || query.toLowerCase().includes('bought')) {
+          const success = onUpdateShoppingItemByName(extracted.productName || query, { isPurchased: true } as any);
+          actionText = success ? `Marked ${extracted.productName} purchased` : 'Update failed';
+        }
+        setContext({});
+      } else if (intent === 'navigate' && navTab) {
+        onNavigateTab(navTab);
+        setContext({});
+        actionText = `Navigated to ${navTab}`;
+      } else if (intent === 'generate_recipe') {
+        const expiring = products.filter(p => !p.isUsed).map(p => p.name);
+        onGenerateRecipeWithIngredients(expiring.slice(0, 4));
+        onNavigateTab('recipes');
+        actionText = 'Generating recipes';
+        setContext({});
+      } else {
+        setContext({});
+      }
+
+      finishAssistantResponse(finalReplyText, actionText || undefined);
+
+    } catch (err) {
+      console.warn('AI Voice assistant API failed, falling back to local NLU parser:', err);
+      
       const lower = query.toLowerCase();
       let replyText = '';
       let actionTaken = '';
 
-      // Check if we are in a pending multi-turn conversation
       if (context.pendingAction === 'add_product') {
         const dateFound = parseNaturalDate(query);
         const qtyFound = parseQuantity(query);
@@ -270,7 +406,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           return;
         }
 
-        // Add Product!
         onAddProduct({
           name: updatedName,
           expiryDate: updatedDate,
@@ -281,7 +416,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           source: 'Manual',
         });
 
-        replyText = `Done! ${updatedName} (${updatedQty} ${qtyFound.unit}) expiring on ${updatedDate} has been added successfully to your pantry.`;
+        replyText = `Product is added. Product added successfully. ${updatedName} (${updatedQty} ${qtyFound.unit}) expiring on ${updatedDate} has been added successfully to your pantry.`;
         actionTaken = `Added ${updatedName} to Pantry`;
         setContext({});
         finishAssistantResponse(replyText, actionTaken);
@@ -332,30 +467,42 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         }
       }
 
-      // 3. Query Fridge or Specific Category
-      if (lower.includes('fridge') || lower.includes('refrigerator')) {
-        const fridgeItems = products.filter(p => p.location === 'Refrigerator' && !p.isUsed);
-        replyText = fridgeItems.length > 0
-          ? `In your refrigerator, you have ${fridgeItems.length} item(s): ${fridgeItems.map(p => p.name).join(', ')}.`
-          : "Your refrigerator is currently empty.";
-        finishAssistantResponse(replyText);
-        return;
-      }
-
-      // 4. Delete Command
-      if (lower.startsWith('delete') || lower.startsWith('remove')) {
-        const targetName = lower.replace(/delete|remove|the|product/g, '').trim();
+      // 3. Mark Used / Delete Command
+      if (lower.includes('used') || lower.includes('finished') || lower.includes('done')) {
+        const targetName = lower.replace(/mark|as used|used|finished|done|the/g, '').trim();
         if (targetName) {
-          const success = onDeleteProductByName(targetName);
+          const success = onMarkProductUsedByName(targetName);
           replyText = success
-            ? `Successfully removed ${targetName} from your pantry.`
+            ? `Marked ${targetName} as finished in your pantry.`
             : `Could not find an active product matching "${targetName}" in your pantry.`;
-          finishAssistantResponse(replyText, success ? `Deleted ${targetName}` : undefined);
+          finishAssistantResponse(replyText, success ? `Marked ${targetName} used` : undefined);
           return;
         }
       }
 
-      // 5. Cooking / Recipe Generation Query
+      if (lower.startsWith('delete') || lower.startsWith('remove')) {
+        if (lower.includes('shopping')) {
+          const targetName = lower.replace(/delete|remove|from shopping list|from shopping|list/g, '').trim();
+          const success = onDeleteShoppingItemByName(targetName);
+          replyText = success
+            ? `Successfully removed ${targetName} from your shopping list.`
+            : `Could not find "${targetName}" on your shopping list.`;
+          finishAssistantResponse(replyText, success ? `Removed ${targetName}` : undefined);
+          return;
+        } else {
+          const targetName = lower.replace(/delete|remove|the|product/g, '').trim();
+          if (targetName) {
+            const success = onDeleteProductByName(targetName);
+            replyText = success
+              ? `Successfully removed ${targetName} from your pantry.`
+              : `Could not find an active product matching "${targetName}" in your pantry.`;
+            finishAssistantResponse(replyText, success ? `Deleted ${targetName}` : undefined);
+            return;
+          }
+        }
+      }
+
+      // 4. Cooking / Recipe Query
       if (lower.includes('cook') || lower.includes('recipe') || lower.includes('breakfast') || lower.includes('dinner')) {
         const matched = products.filter(p => !p.isUsed).map(p => p.name);
         onGenerateRecipeWithIngredients(matched.slice(0, 4));
@@ -365,16 +512,13 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         return;
       }
 
-      // 6. Add Command Parsing (Multi-turn or Single Shot)
+      // 5. Add Command Parsing
       if (lower.startsWith('add') || lower.includes('bought') || lower.includes('bought a') || lower.includes('add to shopping')) {
-        // Check if adding to Shopping List vs Pantry
         const isShoppingList = lower.includes('shopping list') || lower.includes('shopping');
-
         const cleanStr = lower.replace(/add|bought|to my pantry|to pantry|to shopping list|to shopping/g, '').trim();
         const dateParsed = parseNaturalDate(query);
         const qtyParsed = parseQuantity(query);
 
-        // Extract product name by removing dates/numbers
         let nameCandidate = cleanStr
           ? cleanStr.replace(/expiring.*|expires.*|yesterday|tomorrow|today|\d+|\b(one|two|three|four|five|six|seven|eight|nine|ten|packets|pack|pcs|kg|liter)\b/gi, '').trim()
           : '';
@@ -400,9 +544,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           return;
         }
 
-        // Add to Pantry
         if (!dateParsed) {
-          // Ask for missing expiry date (multi-turn memory)
           setContext({
             pendingAction: 'add_product',
             productName: nameCandidate,
@@ -415,7 +557,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           return;
         }
 
-        // Complete add
         onAddProduct({
           name: nameCandidate,
           expiryDate: dateParsed,
@@ -426,16 +567,15 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           source: 'Manual',
         });
 
-        replyText = `Done! "${nameCandidate}" (${qtyParsed.qty} ${qtyParsed.unit}) expiring on ${dateParsed} has been added to your pantry.`;
+        replyText = `Product is added. Product added successfully. "${nameCandidate}" (${qtyParsed.qty} ${qtyParsed.unit}) expiring on ${dateParsed} has been added to your pantry.`;
         finishAssistantResponse(replyText, `Added ${nameCandidate} to Pantry`);
         return;
       }
 
-      // Default General Pantry Assistant Response
+      // Default General Response
       replyText = `I analyzed your pantry: You have ${products.length} products stored. Would you like me to add a product, check expiring items, open your shopping list, or suggest recipes?`;
       finishAssistantResponse(replyText);
-
-    }, 600);
+    }
   };
 
   const finishAssistantResponse = (text: string, actionText?: string) => {
@@ -469,13 +609,13 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-[#1A1C1E] dark:text-white flex items-center gap-2">
-                AI Voice Assistant
+                Smart Pantry Voice AI
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
                   Live Voice
                 </span>
               </h3>
               <p className="text-xs text-slate-400 font-medium">
-                Hands-free pantry & shopping management
+                Pantry Product Entry & Smart Shopping
               </p>
             </div>
           </div>
@@ -483,38 +623,38 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setIsMuted(!isMuted)}
-              className={`p-2 rounded-xl transition-colors ${
-                isMuted ? 'text-red-500 bg-red-50 dark:bg-red-950/40' : 'text-slate-500 bg-slate-100 dark:bg-slate-800'
+              className={`p-2 rounded-xl border transition-colors ${
+                isMuted 
+                  ? 'bg-red-50 dark:bg-red-950/20 border-red-200 text-red-500' 
+                  : 'bg-white dark:bg-slate-800 border-[#E2E4E9] dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white'
               }`}
-              title={isMuted ? 'Unmute voice output' : 'Mute voice output'}
+              title={isMuted ? "Unmute Voice Response" : "Mute Voice Response"}
             >
               {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
             </button>
-
+            
             <button
               onClick={onClose}
-              className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
+              className="p-2 rounded-xl bg-white dark:bg-slate-800 border border-[#E2E4E9] dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* Quick Suggestion Chips */}
-        <div className="px-4 py-2 bg-slate-100/60 dark:bg-slate-800/40 border-b border-[#E2E4E9] dark:border-slate-800 flex items-center gap-2 overflow-x-auto text-xs">
-          <span className="text-slate-400 font-bold shrink-0">Try:</span>
+        <div className="p-3 bg-slate-50 dark:bg-slate-900 border-b border-[#E2E4E9] dark:border-slate-800 flex gap-2 overflow-x-auto select-none no-scrollbar">
           {[
-            'Add milk expiring July 30',
-            'Open Shopping List',
-            'What expires this week?',
-            'What can I cook today?',
-            'What medicines expire?',
-            'Delete eggs'
+            "Add 2 Amul milk packets expiring on July 30",
+            "Update Bread quantity to 3",
+            "Mark Eggs as Used",
+            "What can I cook today?",
+            "Open Shopping List"
           ].map((chip, idx) => (
             <button
               key={idx}
               onClick={() => handleUserQuery(chip)}
-              className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-[#E2E4E9] dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold shrink-0 hover:border-teal-600 transition-colors"
+              className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-[#E2E4E9] dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold shrink-0 hover:border-teal-600 transition-colors text-xs"
             >
               {chip}
             </button>

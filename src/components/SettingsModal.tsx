@@ -32,7 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onResetData,
 }) => {
   const [theme, setTheme] = useState(preferences.theme);
-  const [currency, setCurrency] = useState(preferences.currency || '$');
+  const [currency, setCurrency] = useState(preferences.currency || '₹');
   const [browserNotifs, setBrowserNotifs] = useState(preferences.enableBrowserNotifications);
   const [dietary, setDietary] = useState(preferences.dietaryPreference || 'None');
   const [reminderDays, setReminderDays] = useState<number[]>(preferences.reminderDays || [7, 3, 2, 1, 0]);
@@ -169,10 +169,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={(e) => setCurrency(e.target.value)}
                 className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white outline-none"
               >
-                <option value="$">$ (USD)</option>
-                <option value="₹">₹ (INR)</option>
-                <option value="€">€ (EUR)</option>
-                <option value="£">£ (GBP)</option>
+                 <option value="₹">₹ (INR)</option>
               </select>
             </div>
           </div>

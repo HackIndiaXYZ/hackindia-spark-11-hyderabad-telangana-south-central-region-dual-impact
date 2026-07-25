@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
-import { X, Mail, Lock, User as UserIcon, ShieldCheck, ArrowRight, Sparkles } from 'lucide-react';
+import { X, Mail, Lock, User as UserIcon, ShieldCheck, ArrowRight, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
 import { User } from '../types';
+import { 
+  auth, 
+  isConfigured,
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider
+} from '../services/firebase';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -17,33 +25,92 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleEmailAuth = (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) return;
+    setIsLoading(true);
+    setErrorMsg(null);
 
-    const authUser: User = {
-      uid: `usr_${Date.now()}`,
-      email,
-      displayName: name || email.split('@')[0],
-      isGuest: false,
-      photoURL: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
-    };
+    if (isConfigured && auth) {
+      try {
+        let userCredential;
+        if (isRegister) {
+          userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        } else {
+          userCredential = await signInWithEmailAndPassword(auth, email, password);
+        }
 
-    onLogin(authUser);
-    onClose();
+        const firebaseUser = userCredential.user;
+        const authUser: User = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || email,
+          displayName: firebaseUser.displayName || name || email.split('@')[0],
+          isGuest: false,
+          photoURL: firebaseUser.photoURL || `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
+        };
+
+        onLogin(authUser);
+        onClose();
+      } catch (err: any) {
+        console.error('Firebase Email Auth Error:', err);
+        setErrorMsg(err.message || 'Authentication failed. Please check credentials.');
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      // Mock fallback
+      const authUser: User = {
+        uid: `usr_${Date.now()}`,
+        email,
+        displayName: name || email.split('@')[0],
+        isGuest: false,
+        photoURL: `https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150`,
+      };
+      onLogin(authUser);
+      setIsLoading(false);
+      onClose();
+    }
   };
 
-  const handleGoogleSignIn = () => {
-    const authUser: User = {
-      uid: `google_${Date.now()}`,
-      email: 'alex.morgan@gmail.com',
-      displayName: 'Alex Morgan',
-      photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      isGuest: false,
-    };
-    onLogin(authUser);
-    onClose();
+  const handleGoogleSignIn = async () => {
+    setIsLoading(true);
+    setErrorMsg(null);
+    if (isConfigured && auth) {
+      try {
+        const provider = new GoogleAuthProvider();
+        const userCredential = await signInWithPopup(auth, provider);
+        const firebaseUser = userCredential.user;
+        const authUser: User = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email || 'google.user@example.com',
+          displayName: firebaseUser.displayName || 'Google User',
+          photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+          isGuest: false,
+        };
+        onLogin(authUser);
+        onClose();
+      } catch (err: any) {
+        console.error('Firebase Google Sign-In Error:', err);
+        setErrorMsg(err.message || 'Google Sign-In failed.');
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      // Mock fallback
+      const authUser: User = {
+        uid: `google_${Date.now()}`,
+        email: 'alex.morgan@gmail.com',
+        displayName: 'Alex Morgan',
+        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+        isGuest: false,
+      };
+      onLogin(authUser);
+      setIsLoading(false);
+      onClose();
+    }
   };
 
   return (
@@ -66,14 +133,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {isRegister ? 'Create Account' : 'Welcome Back'}
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Sync your expiry inventory across device sessions with Firebase Auth
+            {isConfigured 
+              ? 'Sync your expiry inventory across device sessions with Firebase Auth' 
+              : 'App is running in Mock/Guest mode (No Firebase keys set)'}
           </p>
         </div>
 
         {/* Google Sign In */}
         <button
           onClick={handleGoogleSignIn}
-          className="w-full py-3 px-4 rounded-2xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-800 dark:text-slate-100 transition-colors flex items-center justify-center gap-3 mb-4 shadow-sm"
+          disabled={isLoading}
+          className="w-full py-3 px-4 rounded-2xl bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-800 dark:text-slate-100 transition-colors flex items-center justify-center gap-3 mb-4 shadow-sm disabled:opacity-50"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -88,6 +158,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-800" /></div>
           <span className="relative bg-white dark:bg-slate-900 px-3 text-[10px] uppercase font-bold text-slate-400">Or with Email</span>
         </div>
+
+        {errorMsg && (
+          <div className="mb-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         {/* Email Form */}
         <form onSubmit={handleEmailAuth} className="space-y-3">
@@ -146,16 +223,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <button
             type="submit"
-            className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-colors flex items-center justify-center gap-2 mt-2"
+            disabled={isLoading}
+            className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-md transition-colors flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
           >
-            <span>{isRegister ? 'Sign Up' : 'Sign In'}</span>
-            <ArrowRight className="w-4 h-4" />
+            {isLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <span>{isRegister ? 'Sign Up' : 'Sign In'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 
         <div className="mt-4 text-center">
           <button
-            onClick={() => setIsRegister(!isRegister)}
+            onClick={() => {
+              setIsRegister(!isRegister);
+              setErrorMsg(null);
+            }}
             className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
           >
             {isRegister ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
