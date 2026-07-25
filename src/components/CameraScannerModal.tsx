@@ -81,6 +81,30 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
     setIsAnalyzing(true);
 
     try {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const vWidth = video.videoWidth || 640;
+      const vHeight = video.videoHeight || 480;
+
+      // Stage 1: Auto Crop to Viewfinder Reticle (3/4 width, 1/2 height in center)
+      const cropWidth = Math.floor(vWidth * 0.75);
+      const cropHeight = Math.floor(vHeight * 0.50);
+      const cropX = Math.floor((vWidth - cropWidth) / 2);
+      const cropY = Math.floor((vHeight - cropHeight) / 2);
+
+      canvas.width = cropWidth;
+      canvas.height = cropHeight;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Image Preprocessing: Enhancing contrast, grayscaling, and sharpening for OCR readability
+      ctx.filter = 'contrast(1.45) brightness(1.05) grayscale(0.2) saturate(1.1)';
+      ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+      
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
+      setCapturedImage(dataUrl);
+
       const response = await fetch('/api/ocr-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -106,6 +130,12 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const getConfidenceColor = (score: number) => {
+    if (score >= 0.8) return 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40';
+    if (score >= 0.5) return 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40';
+    return 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40';
   };
 
   const handleRetake = () => {
@@ -232,12 +262,24 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white">
                     Verified Product Information
                   </h3>
-                  {ocrResult?.confidenceScore && (
-                    <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md">
+                  {ocrResult?.confidenceScore !== undefined && (
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${getConfidenceColor(ocrResult.confidenceScore)}`}>
                       Confidence: {Math.round(ocrResult.confidenceScore * 100)}%
                     </span>
                   )}
                 </div>
+
+                {ocrResult?.reason && (
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/50 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">AI Logic: </span>
+                    {ocrResult.reason} 
+                    {ocrResult.detectionMethod && (
+                      <span className="ml-1.5 px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-[9px] font-bold uppercase tracking-wider">
+                        {ocrResult.detectionMethod}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
@@ -256,6 +298,11 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                     Expiry Date *
                   </label>
+                  {ocrResult && !expiryDate && (
+                    <div className="p-2.5 mb-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[11px] font-semibold border border-rose-100 dark:border-rose-900/30">
+                      ⚠️ No expiry date detected. Please enter it manually.
+                    </div>
+                  )}
                   <input
                     type="date"
                     value={expiryDate}

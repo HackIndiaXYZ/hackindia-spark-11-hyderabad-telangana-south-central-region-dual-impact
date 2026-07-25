@@ -92,6 +92,12 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
     });
   };
 
+  const getConfidenceColor = (score: number) => {
+    if (score >= 0.8) return 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40';
+    if (score >= 0.5) return 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40';
+    return 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40';
+  };
+
   return (
     <div className="max-w-3xl mx-auto py-6 px-4">
       
@@ -106,36 +112,36 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <Upload className="w-5 h-5 text-indigo-500" />
-            Upload Image OCR Scan
+            Upload Product Image
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Upload photo of product packaging or receipt to extract dates & metadata
+            Upload an image of the product packaging or barcode for AI extraction
           </p>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xl">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-6 shadow-xl">
         {!imagePreview ? (
-          /* Upload Drag & Drop Dropzone */
-          <label className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer transition-colors group bg-slate-50/50 dark:bg-slate-800/30">
+          /* Dropzone Upload View */
+          <div className="border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors cursor-pointer relative group">
             <input 
               type="file" 
-              accept="image/*" 
-              onChange={handleFileChange} 
-              className="hidden" 
+              accept="image/*"
+              onChange={handleFileChange}
+              className="absolute inset-0 opacity-0 cursor-pointer"
             />
-            <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <FileImage className="w-8 h-8" />
+            <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
+              <Upload className="w-6 h-6" />
             </div>
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-1">
-              Click to upload or drag & drop image
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">
+              Select or Drop Product Image
             </p>
-            <p className="text-xs text-slate-400 text-center max-w-sm">
-              Supports JPG, PNG, WEBP. Gemini AI will scan for expiry dates, manufacturing dates, and product names.
+            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+              Supports JPEG, PNG up to 10MB. Expiry dates, brands, and categories are extracted automatically.
             </p>
-          </label>
+          </div>
         ) : (
-          /* Preview and Form Details */
+          /* Image Preview and Form View */
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
             
             {/* Image Preview Card */}
@@ -165,12 +171,24 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white">
                   Extracted Product Details
                 </h3>
-                {ocrResult?.confidenceScore && (
-                  <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 px-2 py-0.5 rounded-md">
+                {ocrResult?.confidenceScore !== undefined && (
+                  <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${getConfidenceColor(ocrResult.confidenceScore)}`}>
                     AI Score: {Math.round(ocrResult.confidenceScore * 100)}%
                   </span>
                 )}
               </div>
+
+              {ocrResult?.reason && (
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/50 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">AI Logic: </span>
+                  {ocrResult.reason}
+                  {ocrResult.detectionMethod && (
+                    <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-200 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded text-[9px] font-bold uppercase tracking-wider">
+                      {ocrResult.detectionMethod}
+                    </span>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
@@ -189,6 +207,11 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
                 <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
                   Expiry Date *
                 </label>
+                {ocrResult && !expiryDate && (
+                  <div className="p-2.5 mb-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[11px] font-semibold border border-rose-100 dark:border-rose-900/30">
+                    ⚠️ No expiry date detected. Please enter it manually.
+                  </div>
+                )}
                 <input
                   type="date"
                   value={expiryDate}

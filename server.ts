@@ -58,18 +58,27 @@ async function startServer() {
         },
       };
 
-      const promptText = `Analyze this product packaging image carefully.
-Extract any text related to:
-1. Product Name
-2. Brand or Manufacturer
-3. Expiry Date or Best Before Date (Convert to YYYY-MM-DD format if possible, e.g. "2026-03-30")
-4. Manufacturing Date (MFD or PKD) (Convert to YYYY-MM-DD format if possible)
-5. Barcode number (digits)
-6. Batch Number / Lot Number
-7. MRP or Price (e.g. $4.50 or Rs 150)
-8. Product Category (Select one: Medicine, Dairy, Vegetables, Fruits, Bakery, Snacks, Frozen Food, Beverages, Cosmetics, Baby Products, Supplements, Other)
-9. Your overall Confidence Score (0.0 to 1.0)
-10. Raw detected text summary.`;
+      const promptText = `Analyze this product packaging image carefully and extract details using this multi-stage OCR & AI pipeline:
+
+STAGE 1: IMAGE UNDERSTANDING & DESKEW
+- Detect every text block. Store rawText, confidenceScore, bounding boxes, and lines.
+
+STAGE 2: DATE LABEL CATEGORIZATION
+- Categorize dates into Expiry vs Manufacturing.
+- Expiry labels to identify: EXP, Expiry, Expires, Use Before, Best Before, Consume Before, BB, BBE, Expiry Date, Expiration, EXP DATE, USE BY, BEST BEFORE.
+- Manufacturing/Packing labels to ignore: MFG, Manufactured, PKD, Packed On, DOM, Date of Manufacture, LOT, Batch.
+- Ignore batch numbers, serial numbers, invoice numbers, QR data, and barcode digits.
+
+STAGE 3: INTELLIGENT DATE SELECTION & VALIDATION
+- If multiple dates exist, prioritize candidate dates that immediately follow expiry keywords (e.g. EXP, Expiry, Best Before).
+- Second priority: dates near expiry keywords.
+- Third priority: largest future date.
+- NEVER choose manufacturing dates, packed dates, invoice dates, or random digits as the expiry date.
+- Validate candidates: Must be correct YYYY-MM-DD format, must be valid calendar dates, must NOT be older than manufacturing date, must be reasonable future dates.
+- Support country-aware date formats from India, USA, and Europe (e.g., DD/MM/YYYY, MM/DD/YYYY, DD MON YYYY, MMM-YY, MM/YY). Automatically infer correct date based on product context.
+- If no expiry date exists on the packaging, set expiryDate to an empty string. Do NOT invent dates or guess.
+
+Return the details in JSON structure matching the schema.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -77,15 +86,15 @@ Extract any text related to:
           parts: [imagePart, { text: promptText }],
         },
         config: {
-          systemInstruction: 'You are an expert OCR vision scanner for food, dairy, medicine, and retail products. Always accurately identify expiry dates, manufacturing dates, and product details.',
+          systemInstruction: 'You are an expert OCR vision scanner. Your primary task is to distinguish between manufacturing dates and expiry dates on retail packages. Extract the correct expiry date, validate it (ensuring it is greater than the manufacturing date), identify the confidence score and detection method, and explain your selection reasoning.',
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               productName: { type: Type.STRING, description: 'Detected name of product' },
               brand: { type: Type.STRING, description: 'Brand or manufacturer' },
-              expiryDate: { type: Type.STRING, description: 'Expiry date in YYYY-MM-DD format' },
-              mfdDate: { type: Type.STRING, description: 'Manufacturing date in YYYY-MM-DD format' },
+              expiryDate: { type: Type.STRING, description: 'Expiry date in YYYY-MM-DD format (leave empty string if none detected)' },
+              mfdDate: { type: Type.STRING, description: 'Manufacturing date in YYYY-MM-DD format (leave empty string if none detected)' },
               barcode: { type: Type.STRING, description: 'Barcode numerical digits' },
               batchNumber: { type: Type.STRING, description: 'Batch or Lot number' },
               mrp: { type: Type.STRING, description: 'Retail price or MRP' },
@@ -93,10 +102,12 @@ Extract any text related to:
                 type: Type.STRING, 
                 enum: ['Medicine', 'Dairy', 'Vegetables', 'Fruits', 'Bakery', 'Snacks', 'Frozen Food', 'Beverages', 'Cosmetics', 'Baby Products', 'Supplements', 'Other'] 
               },
-              confidenceScore: { type: Type.NUMBER, description: 'Score between 0 and 1' },
+              confidenceScore: { type: Type.NUMBER, description: 'Confidence score from 0.0 to 1.0' },
+              detectionMethod: { type: Type.STRING, description: 'Method used: Hybrid, Gemini, or OCR' },
               rawText: { type: Type.STRING, description: 'Full text found on package' },
+              reason: { type: Type.STRING, description: 'Detailed reasoning explaining how the expiry date was identified and validated' }
             },
-            required: ['productName', 'expiryDate'],
+            required: ['productName', 'expiryDate', 'detectionMethod', 'reason'],
           },
         },
       });

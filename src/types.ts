@@ -116,6 +116,8 @@ export interface OcrScanResult {
   category?: ProductCategory;
   confidenceScore?: number;
   rawText?: string;
+  detectionMethod?: string;
+  reason?: string;
 }
 
 export type PriorityLevel = 'Low' | 'Medium' | 'High';
