@@ -37,6 +37,11 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
     reader.onloadend = () => {
       const base64Str = reader.result as string;
       setImagePreview(base64Str);
+      setOcrResult(null);
+      setProductName('');
+      setExpiryDate('');
+      setBrand('');
+      setCategory('Dairy');
       
       const img = new Image();
       img.onload = () => {
@@ -234,7 +239,14 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
                 </div>
               )}
               <button
-                onClick={() => setImagePreview(null)}
+                onClick={() => {
+                  setImagePreview(null);
+                  setOcrResult(null);
+                  setProductName('');
+                  setExpiryDate('');
+                  setBrand('');
+                  setCategory('Dairy');
+                }}
                 className="absolute bottom-3 right-3 px-3 py-1.5 rounded-xl bg-black/70 hover:bg-black text-white text-xs font-medium backdrop-blur-md flex items-center gap-1.5"
               >
                 <RefreshCw className="w-3.5 h-3.5" />

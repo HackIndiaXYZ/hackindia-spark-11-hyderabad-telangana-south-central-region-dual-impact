@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -128,24 +129,43 @@ function rebuildDateExtractor(rawText: string): { expiryDate: string | null; mfd
       const surround = rawText.substring(windowStart, windowEnd).toLowerCase();
 
       // Check for Expiry keywords in surrounding context
+      let expiryDistance = 999;
       let matchedExp = "";
       for (const kw of expiryKeywords) {
         if (surround.includes(kw)) {
-          score += 50;
-          matchedExp = kw;
-          break;
+          const kwIndex = surround.indexOf(kw);
+          const datePosInSurround = index - windowStart;
+          const dist = Math.abs(kwIndex - datePosInSurround);
+          if (dist < expiryDistance) {
+            expiryDistance = dist;
+            matchedExp = kw;
+          }
         }
       }
 
+      if (matchedExp) {
+        score += 50;
+      }
+
       // Check for Manufacturing keywords in surrounding context
+      let mfgDistance = 999;
+      let matchedMfg = "";
       for (const kw of mfgKeywords) {
         if (surround.includes(kw)) {
           const kwIndex = surround.indexOf(kw);
           const datePosInSurround = index - windowStart;
           const dist = Math.abs(kwIndex - datePosInSurround);
-          if (dist < 25) {
-            score -= 60; // Penalize heavily if very close to MFG label
+          if (dist < mfgDistance) {
+            mfgDistance = dist;
+            matchedMfg = kw;
           }
+        }
+      }
+
+      if (matchedMfg && mfgDistance < 25) {
+        // Only penalize if the MFG keyword is closer to the date than the EXP keyword!
+        if (mfgDistance < expiryDistance) {
+          score -= 60; // Penalize heavily if very close to MFG label
         }
       }
 
@@ -204,7 +224,7 @@ function rebuildDateExtractor(rawText: string): { expiryDate: string | null; mfd
   // OCR Scan API (Extracts Expiry Date, Manufacturing Date, Product Name, Brand, Barcode, etc.)
   app.post('/api/ocr-scan', async (req, res) => {
     try {
-      const { imageBase64 } = req.body;
+      const { imageBase64, enhancedBase64, thresholdBase64 } = req.body;
       if (!imageBase64) {
         return res.status(400).json({ error: 'Missing imageBase64 in request body' });
       }
@@ -213,28 +233,52 @@ function rebuildDateExtractor(rawText: string): { expiryDate: string | null; mfd
       const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       const ai = getGeminiClient();
 
-      const imagePart = {
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: cleanBase64,
-        },
-      };
+      const parts: any[] = [
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: cleanBase64,
+          },
+        }
+      ];
 
-      const promptText = `Analyze this product packaging image.
-Extract all raw printed text from the image, exactly as printed, line-by-line.
-Also identify:
-1. Product Name (productName)
-2. Brand or Manufacturer (brand)
-3. MRP or Price (mrp)
-4. Product Category (category: select one of Dairy, Snacks, Bakery, Medicine, Beverages, Fruits, Vegetables, Frozen Food, Cosmetics, Baby Products, Supplements, Other)
-5. Barcode numerical digits (barcode)
+      if (enhancedBase64) {
+        const cleanEnhanced = enhancedBase64.replace(/^data:image\/\w+;base64,/, '');
+        parts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: cleanEnhanced,
+          },
+        });
+      }
+
+      if (thresholdBase64) {
+        const cleanThreshold = thresholdBase64.replace(/^data:image\/\w+;base64,/, '');
+        parts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: cleanThreshold,
+          },
+        });
+      }
+
+      const promptText = `Analyze the provided product packaging images (Original, Enhanced, and Thresholded).
+Perform OCR text extraction across all images. Merge the results to extract the complete printed text line-by-line.
+Identify the product details:
+1. Product Name (product_name)
+2. Brand or Manufacturer
+3. Product Category (category: select one of Dairy, Snacks, Bakery, Medicine, Beverages, Fruits, Vegetables, Frozen Food, Cosmetics, Baby Products, Supplements, Other)
+4. Barcode numerical digits
+5. Expiry Date (expiry_date) - Choose ONLY from dates actually printed on the package. If no expiry date is printed, return null or empty string.
+6. Manufacturing Date (manufacturing_date) - Choose ONLY from dates actually printed on the package.
+7. Raw Text (rawText) - All printed text lines merged together.
 
 Your response must be JSON only matching the schema.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: {
-          parts: [imagePart, { text: promptText }],
+          parts: [...parts, { text: promptText }],
         },
         config: {
           systemInstruction: 'You are an expert OCR vision scanner. Extract raw text line-by-line and identify basic product metadata.',
@@ -242,17 +286,18 @@ Your response must be JSON only matching the schema.`;
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              productName: { type: Type.STRING, description: 'Detected name of product' },
+              product_name: { type: Type.STRING, description: 'Detected name of product' },
               brand: { type: Type.STRING, description: 'Brand or manufacturer' },
               barcode: { type: Type.STRING, description: 'Barcode numerical digits' },
-              mrp: { type: Type.STRING, description: 'Retail price or MRP' },
               category: { 
                 type: Type.STRING, 
                 enum: ['Medicine', 'Dairy', 'Vegetables', 'Fruits', 'Bakery', 'Snacks', 'Frozen Food', 'Beverages', 'Cosmetics', 'Baby Products', 'Supplements', 'Other'] 
               },
-              rawText: { type: Type.STRING, description: 'Full text found on package exactly as printed, line-by-line' },
+              expiry_date: { type: Type.STRING, description: 'Exact expiry date string printed on packaging' },
+              manufacturing_date: { type: Type.STRING, description: 'Exact manufacturing date string printed on packaging' },
+              rawText: { type: Type.STRING, description: 'Full text found on package exactly as printed' }
             },
-            required: ['productName', 'rawText'],
+            required: ['product_name', 'rawText'],
           },
         },
       });
@@ -263,16 +308,34 @@ Your response must be JSON only matching the schema.`;
       // Deterministic Date Extractor on the Raw OCR Text (Step 3 to 6)
       const extracted = rebuildDateExtractor(parsed.rawText || "");
 
+      // Step 8: Debug Mode - Print log block
+      const timestamp = new Date().toISOString();
+      const imageHash = crypto.createHash('sha256').update(cleanBase64).digest('hex');
+      const chosenExpiry = extracted.expiryDate || parsed.expiry_date || "";
+
+      console.log("========== NEW SCAN ==========");
+      console.log(`Timestamp: ${timestamp}`);
+      console.log(`Image Hash: ${imageHash}`);
+      console.log(`OCR Raw Text:\n${parsed.rawText || ""}`);
+      console.log(`Gemini Raw Response:\n${resultText}`);
+      console.log(`Chosen Expiry: ${chosenExpiry}`);
+      console.log(`Confidence: ${extracted.confidence}`);
+      console.log("==============================");
+
       const finalResponse = {
-        productName: parsed.productName || "Scanned Product",
+        productName: parsed.product_name || "Scanned Product",
+        product_name: parsed.product_name || "Scanned Product",
         brand: parsed.brand || "",
-        expiryDate: extracted.expiryDate || "", // Deterministic exact text matched by OCR regex
-        mfdDate: extracted.mfdDate || "",
+        expiryDate: chosenExpiry, // Deterministic exact text matched by OCR regex
+        expiry_date: chosenExpiry,
+        mfdDate: extracted.mfdDate || parsed.manufacturing_date || "",
+        manufacturing_date: extracted.mfdDate || parsed.manufacturing_date || "",
         barcode: parsed.barcode || "",
         batchNumber: "",
-        mrp: parsed.mrp || "",
+        mrp: "",
         category: parsed.category || "Other",
         confidenceScore: extracted.confidence,
+        confidence: extracted.confidence,
         detectionMethod: "Hybrid",
         rawText: parsed.rawText || "",
         reason: extracted.reason

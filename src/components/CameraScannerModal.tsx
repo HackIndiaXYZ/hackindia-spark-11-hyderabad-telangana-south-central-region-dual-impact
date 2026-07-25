@@ -95,6 +95,13 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
     if (!videoRef.current || !canvasRef.current) return;
 
     try {
+      // Clear previous scan state to avoid any stale data carryover
+      setOcrResult(null);
+      setProductName('');
+      setExpiryDate('');
+      setBrand('');
+      setCategory('Dairy');
+
       const video = videoRef.current;
       const canvas = canvasRef.current;
       const vWidth = video.videoWidth || 640;
@@ -181,6 +188,10 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   const handleRetake = () => {
     setCapturedImage(null);
     setOcrResult(null);
+    setProductName('');
+    setExpiryDate('');
+    setBrand('');
+    setCategory('Dairy');
     startCamera();
   };
 
