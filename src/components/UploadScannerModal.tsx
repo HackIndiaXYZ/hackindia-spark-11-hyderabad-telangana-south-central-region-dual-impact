@@ -36,18 +36,18 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
     reader.onloadend = () => {
       const base64Str = reader.result as string;
       setImagePreview(base64Str);
-      analyzeImage(base64Str);
+      analyzeImage(base64Str, file.name);
     };
     reader.readAsDataURL(file);
   };
 
-  const analyzeImage = async (base64Data: string) => {
+  const analyzeImage = async (base64Data: string, fileName?: string) => {
     setIsAnalyzing(true);
     try {
       const response = await fetch('/api/ocr-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Data }),
+        body: JSON.stringify({ imageBase64: base64Data, fileName }),
       });
 
       if (!response.ok) {
