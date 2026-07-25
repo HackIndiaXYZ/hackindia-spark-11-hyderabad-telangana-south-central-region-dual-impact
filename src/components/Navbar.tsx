@@ -20,11 +20,13 @@ interface NavbarProps {
   onUpdatePreferences: (prefs: UserPreferences) => void;
   notifications: AppNotification[];
   onMarkNotificationRead: (id: string) => void;
-  onOpenAuth: () => void;
+  onOpenAuth: (isRegister?: boolean) => void;
   onOpenMobileMenu: () => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   onLogout: () => void;
+  activeTab?: string;
+  onNavigateTab?: (tab: any) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -38,6 +40,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   searchQuery,
   setSearchQuery,
   onLogout,
+  activeTab,
+  onNavigateTab,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -74,6 +78,50 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="w-full pl-9 pr-4 py-2 text-sm bg-slate-50 dark:bg-slate-800/80 border border-[#E2E4E9] dark:border-slate-700/60 rounded-xl focus:bg-white dark:focus:bg-slate-900 focus:border-teal-600 dark:focus:border-teal-500 focus:outline-none transition-all text-[#1A1C1E] dark:text-slate-100 placeholder-slate-400"
             />
           </div>
+        </div>
+
+        {/* Navigation links (Desktop) */}
+        <div className="hidden lg:flex items-center gap-1.5 mx-4">
+          <button
+            onClick={() => onNavigateTab?.('dashboard')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'dashboard'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => onNavigateTab?.('scan')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'scan'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            Scanner
+          </button>
+          <button
+            onClick={() => onNavigateTab?.('shopping')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'shopping'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            Shopping List
+          </button>
+          <button
+            onClick={() => onNavigateTab?.('recipes')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'recipes'
+                ? 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            Recipes
+          </button>
         </div>
 
         {/* Right Tools */}
@@ -158,71 +206,83 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* User Account / Login */}
           <div className="relative">
-            <button
-              onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 p-1.5 pl-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              {user.photoURL ? (
-                <img 
-                  src={user.photoURL} 
-                  alt={user.displayName}
-                  className="w-7 h-7 rounded-full object-cover ring-2 ring-emerald-500/30"
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300 flex items-center justify-center font-bold text-xs">
-                  {user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'}
-                </div>
-              )}
-              <span className="hidden sm:inline text-xs font-medium text-slate-700 dark:text-slate-200 max-w-[100px] truncate">
-                {user.displayName || 'Guest User'}
-              </span>
-            </button>
-
-            {/* Account dropdown */}
-            {showUserMenu && (
-              <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50">
-                <div className="p-3 border-b border-slate-100 dark:border-slate-800">
-                  <p className="font-semibold text-xs text-slate-900 dark:text-white truncate">
-                    {user.displayName || 'Guest User'}
-                  </p>
-                  <p className="text-[11px] text-slate-400 truncate mt-0.5">{user.email}</p>
-                  {user.isGuest && (
-                    <span className="inline-block mt-1 text-[10px] font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md">
-                      Guest Mode
-                    </span>
-                  )}
-                </div>
-
-                <div className="py-1 space-y-0.5">
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      onOpenAuth();
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
-                  >
-                    <UserIcon className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{user.isGuest ? 'Sign In / Register' : 'Account Profile'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setShowUserMenu(false);
-                      onLogout();
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Switch Account / Reset</span>
-                  </button>
-                </div>
+            {user.isGuest ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onOpenAuth(false)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-slate-700 dark:text-slate-200 cursor-pointer"
+                >
+                  Login
+                </button>
+                <button
+                  onClick={() => onOpenAuth(true)}
+                  className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                >
+                  Sign Up
+                </button>
               </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowUserMenu(!showUserMenu)}
+                  className="flex items-center gap-2 p-1.5 pl-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  {user.photoURL ? (
+                    <img 
+                      src={user.photoURL} 
+                      alt={user.displayName}
+                      className="w-7 h-7 rounded-full object-cover ring-2 ring-emerald-500/30"
+                    />
+                  ) : (
+                    <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300 flex items-center justify-center font-bold text-xs">
+                      {user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'}
+                    </div>
+                  )}
+                  <span className="hidden sm:inline text-xs font-medium text-slate-700 dark:text-slate-200 max-w-[100px] truncate">
+                    {user.displayName || 'User'}
+                  </span>
+                </button>
+
+                {/* Account dropdown */}
+                {showUserMenu && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50">
+                    <div className="p-3 border-b border-slate-100 dark:border-slate-800">
+                      <p className="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                        {user.displayName}
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate mt-0.5">{user.email}</p>
+                    </div>
+
+                    <div className="py-1 space-y-0.5">
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onNavigateTab?.('settings');
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <UserIcon className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Profile & Settings</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
+                          onLogout();
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span>Logout</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-          </div>
-
         </div>
-
       </div>
-    </header>
-  );
+    </div>
+  </header>
+);
 };

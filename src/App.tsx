@@ -105,6 +105,7 @@ export function App() {
   const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalInitialRegister, setAuthModalInitialRegister] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Initialize Preferences & Theme
@@ -510,7 +511,10 @@ export function App() {
           onUpdatePreferences={handleUpdatePreferences}
           notifications={notifications}
           onMarkNotificationRead={handleMarkNotificationRead}
-          onOpenAuth={() => setShowAuthModal(true)}
+          onOpenAuth={(isReg) => {
+            setAuthModalInitialRegister(!!isReg);
+            setShowAuthModal(true);
+          }}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -524,6 +528,8 @@ export function App() {
             setUser(guestUser);
             saveUser(guestUser);
           }}
+          activeTab={activeTab}
+          onNavigateTab={setActiveTab}
         />
 
         {/* Dynamic Main Body Content */}
@@ -851,6 +857,7 @@ export function App() {
           onClose={() => setShowAuthModal(false)}
           user={user}
           onLogin={handleLogin}
+          initialRegister={authModalInitialRegister}
         />
       )}
 

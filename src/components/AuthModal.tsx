@@ -14,14 +14,16 @@ interface AuthModalProps {
   onClose: () => void;
   user: User;
   onLogin: (user: User) => void;
+  initialRegister?: boolean;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   user,
   onLogin,
+  initialRegister = false,
 }) => {
-  const [isRegister, setIsRegister] = useState(false);
+  const [isRegister, setIsRegister] = useState(initialRegister);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
