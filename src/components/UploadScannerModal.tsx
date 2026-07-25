@@ -58,7 +58,10 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
       setOcrResult(result);
 
       if (result.productName) setProductName(result.productName);
-      if (result.expiryDate) setExpiryDate(result.expiryDate);
+      if (result.expiryDate) {
+        const parsed = parseToIsoDate(result.expiryDate);
+        setExpiryDate(parsed || result.expiryDate);
+      }
       if (result.category) setCategory(result.category);
       if (result.brand) setBrand(result.brand);
     } catch (err) {
@@ -96,6 +99,34 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
     if (score >= 0.8) return 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40';
     if (score >= 0.5) return 'text-amber-700 bg-amber-50 dark:text-amber-300 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/40';
     return 'text-rose-700 bg-rose-50 dark:text-rose-300 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40';
+  };
+
+  const parseToIsoDate = (dateStr: string): string => {
+    if (!dateStr) return '';
+    if (/^\d{4}\-\d{2}\-\d{2}$/.test(dateStr)) return dateStr;
+
+    // DD/MM/YYYY or DD-MM-YYYY
+    const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, '0');
+      const month = dmyMatch[2].padStart(2, '0');
+      const year = dmyMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+
+    // MM/YYYY or MM-YYYY
+    const myMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
+    if (myMatch) {
+      const month = myMatch[1].padStart(2, '0');
+      const year = myMatch[2];
+      return `${year}-${month}-01`;
+    }
+
+    const parsed = Date.parse(dateStr);
+    if (!isNaN(parsed)) {
+      return new Date(parsed).toISOString().split('T')[0];
+    }
+    return '';
   };
 
   return (
@@ -218,6 +249,12 @@ export const UploadScannerModal: React.FC<UploadScannerModalProps> = ({
                   onChange={(e) => setExpiryDate(e.target.value)}
                   className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
+                {ocrResult?.expiryDate && (
+                  <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <span>Detected on package:</span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{ocrResult.expiryDate}</span>
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

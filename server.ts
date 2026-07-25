@@ -40,6 +40,168 @@ async function startServer() {
   });
 
   // OCR Scan API (Extracts Expiry Date, Manufacturing Date, Product Name, Brand, Barcode, etc.)
+interface CandidateDate {
+  dateStr: string;
+  pattern: string;
+  index: number;
+  score: number;
+}
+
+function parseDateString(dateStr: string): Date | null {
+  // DD/MM/YYYY
+  const dmy = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    return new Date(parseInt(dmy[3]), parseInt(dmy[2]) - 1, parseInt(dmy[1]));
+  }
+  // YYYY-MM-DD
+  const ymd = dateStr.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/);
+  if (ymd) {
+    return new Date(parseInt(ymd[1]), parseInt(ymd[2]) - 1, parseInt(ymd[3]));
+  }
+  // MM/YYYY
+  const my = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  if (my) {
+    return new Date(parseInt(my[2]), parseInt(my[1]) - 1, 1);
+  }
+  return null;
+}
+
+function formatDateToExactString(date: Date, originalFormatSeed: string): string {
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+
+  if (originalFormatSeed.includes("/")) {
+    return `${day}/${month}/${year}`;
+  } else if (originalFormatSeed.includes("-")) {
+    return `${day}-${month}-${year}`;
+  }
+  return `${year}-${month}-${day}`;
+}
+
+function rebuildDateExtractor(rawText: string): { expiryDate: string | null; mfdDate: string | null; reason: string; confidence: number } {
+  console.log("========== RAW OCR ==========");
+  console.log(rawText);
+  console.log("=============================");
+
+  const expiryKeywords = ["exp", "expiry", "expiration", "use before", "best before", "expires on", "exp date", "useby", "bb", "bbe"];
+  const mfgKeywords = ["mfg", "manufactured", "packed", "pkd", "dom", "date of manufacture", "lot", "batch"];
+
+  const candidates: CandidateDate[] = [];
+
+  const regexes = [
+    // 1. DD/MM/YYYY or DD-MM-YYYY (e.g. 15/06/2026 or 15-06-2026)
+    { pattern: /\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}\b/gi, name: "DD/MM/YYYY" },
+    // 2. YYYY-MM-DD
+    { pattern: /\b\d{4}[\/\-]\d{2}[\/\-]\d{2}\b/gi, name: "YYYY-MM-DD" },
+    // 3. DD MON YYYY (e.g. 15 JUN 2026 or 15-JUN-2026)
+    { pattern: /\b\d{1,2}[\-\s]?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\-\s]?\d{2,4}\b/gi, name: "DD MON YYYY" },
+    // 4. MON YYYY or MMM YYYY (e.g. AUG 2027)
+    { pattern: /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s]\d{4}\b/gi, name: "MON YYYY" },
+    // 5. MMM-YY (e.g. AUG-27)
+    { pattern: /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\-\']\d{2}\b/gi, name: "MMM-YY" },
+    // 6. MM/YYYY or MM-YYYY
+    { pattern: /\b\d{1,2}[\/\-]\d{4}\b/gi, name: "MM/YYYY" },
+    // 7. MM/YY or MM-YY (e.g. 08/27)
+    { pattern: /\b\d{2}[\/\-]\d{2}\b/gi, name: "MM/YY" }
+  ];
+
+  // Search matches for each pattern in rawText
+  for (const item of regexes) {
+    let match;
+    item.pattern.lastIndex = 0;
+    while ((match = item.pattern.exec(rawText)) !== null) {
+      const dateStr = match[0];
+      const index = match.index;
+
+      // Avoid duplicate matches for the same position
+      if (candidates.some(c => Math.abs(c.index - index) < 3)) {
+        continue;
+      }
+
+      // Calculate score based on proximity of keywords
+      let score = 50; // Default base score
+      
+      // Look around the match (e.g., 60 characters before and after)
+      const windowStart = Math.max(0, index - 60);
+      const windowEnd = Math.min(rawText.length, index + dateStr.length + 60);
+      const surround = rawText.substring(windowStart, windowEnd).toLowerCase();
+
+      // Check for Expiry keywords in surrounding context
+      let matchedExp = "";
+      for (const kw of expiryKeywords) {
+        if (surround.includes(kw)) {
+          score += 50;
+          matchedExp = kw;
+          break;
+        }
+      }
+
+      // Check for Manufacturing keywords in surrounding context
+      for (const kw of mfgKeywords) {
+        if (surround.includes(kw)) {
+          const kwIndex = surround.indexOf(kw);
+          const datePosInSurround = index - windowStart;
+          const dist = Math.abs(kwIndex - datePosInSurround);
+          if (dist < 25) {
+            score -= 60; // Penalize heavily if very close to MFG label
+          }
+        }
+      }
+
+      candidates.push({
+        dateStr,
+        pattern: item.name,
+        index,
+        score
+      });
+    }
+  }
+
+  // Filter candidates to ensure they are attached to expiry keywords (score >= 60)
+  const expiryCandidates = candidates.filter(c => c.score >= 60).sort((a, b) => b.score - a.score);
+  const mfgCandidates = candidates.filter(c => c.score < 50).sort((a, b) => a.score - b.score);
+
+  console.log("Debug Mode - Candidate Dates found:", candidates);
+  console.log("Debug Mode - Chosen Expiry Candidates:", expiryCandidates);
+
+  // Check for "Best Before X months from MFG"
+  const bestBeforeMatch = rawText.match(/best\s+before\s+(\d+)\s+months?/i);
+  if (bestBeforeMatch && mfgCandidates.length > 0) {
+    const months = parseInt(bestBeforeMatch[1]);
+    const mfgDateStr = mfgCandidates[0].dateStr;
+    const parsedMfg = parseDateString(mfgDateStr);
+    if (parsedMfg) {
+      const expiryDateObj = new Date(parsedMfg);
+      expiryDateObj.setMonth(expiryDateObj.getMonth() + months);
+      const calculatedExpiry = formatDateToExactString(expiryDateObj, mfgDateStr);
+      return {
+        expiryDate: calculatedExpiry,
+        mfdDate: mfgDateStr,
+        reason: `Calculated ${months} months from MFG date (${mfgDateStr})`,
+        confidence: 0.95
+      };
+    }
+  }
+
+  if (expiryCandidates.length > 0) {
+    return {
+      expiryDate: expiryCandidates[0].dateStr,
+      mfdDate: mfgCandidates.length > 0 ? mfgCandidates[0].dateStr : null,
+      reason: `Detected after expiry keyword`,
+      confidence: expiryCandidates[0].score / 100
+    };
+  }
+
+  return {
+    expiryDate: null,
+    mfdDate: mfgCandidates.length > 0 ? mfgCandidates[0].dateStr : null,
+    reason: "No expiry date detected",
+    confidence: 0.0
+  };
+}
+
+  // OCR Scan API (Extracts Expiry Date, Manufacturing Date, Product Name, Brand, Barcode, etc.)
   app.post('/api/ocr-scan', async (req, res) => {
     try {
       const { imageBase64 } = req.body;
@@ -58,27 +220,16 @@ async function startServer() {
         },
       };
 
-      const promptText = `Analyze this product packaging image carefully and extract details using this multi-stage OCR & AI pipeline:
+      const promptText = `Analyze this product packaging image.
+Extract all raw printed text from the image, exactly as printed, line-by-line.
+Also identify:
+1. Product Name (productName)
+2. Brand or Manufacturer (brand)
+3. MRP or Price (mrp)
+4. Product Category (category: select one of Dairy, Snacks, Bakery, Medicine, Beverages, Fruits, Vegetables, Frozen Food, Cosmetics, Baby Products, Supplements, Other)
+5. Barcode numerical digits (barcode)
 
-STAGE 1: IMAGE UNDERSTANDING & DESKEW
-- Detect every text block. Store rawText, confidenceScore, bounding boxes, and lines.
-
-STAGE 2: DATE LABEL CATEGORIZATION
-- Categorize dates into Expiry vs Manufacturing.
-- Expiry labels to identify: EXP, Expiry, Expires, Use Before, Best Before, Consume Before, BB, BBE, Expiry Date, Expiration, EXP DATE, USE BY, BEST BEFORE.
-- Manufacturing/Packing labels to ignore: MFG, Manufactured, PKD, Packed On, DOM, Date of Manufacture, LOT, Batch.
-- Ignore batch numbers, serial numbers, invoice numbers, QR data, and barcode digits.
-
-STAGE 3: INTELLIGENT DATE SELECTION & VALIDATION
-- If multiple dates exist, prioritize candidate dates that immediately follow expiry keywords (e.g. EXP, Expiry, Best Before).
-- Second priority: dates near expiry keywords.
-- Third priority: largest future date.
-- NEVER choose manufacturing dates, packed dates, invoice dates, or random digits as the expiry date.
-- Validate candidates: Must be correct YYYY-MM-DD format, must be valid calendar dates, must NOT be older than manufacturing date, must be reasonable future dates.
-- Support country-aware date formats from India, USA, and Europe (e.g., DD/MM/YYYY, MM/DD/YYYY, DD MON YYYY, MMM-YY, MM/YY). Automatically infer correct date based on product context.
-- If no expiry date exists on the packaging, set expiryDate to an empty string. Do NOT invent dates or guess.
-
-Return the details in JSON structure matching the schema.`;
+Your response must be JSON only matching the schema.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -86,35 +237,48 @@ Return the details in JSON structure matching the schema.`;
           parts: [imagePart, { text: promptText }],
         },
         config: {
-          systemInstruction: 'You are an expert OCR vision scanner. Your primary task is to distinguish between manufacturing dates and expiry dates on retail packages. Extract the correct expiry date, validate it (ensuring it is greater than the manufacturing date), identify the confidence score and detection method, and explain your selection reasoning.',
+          systemInstruction: 'You are an expert OCR vision scanner. Extract raw text line-by-line and identify basic product metadata.',
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
             properties: {
               productName: { type: Type.STRING, description: 'Detected name of product' },
               brand: { type: Type.STRING, description: 'Brand or manufacturer' },
-              expiryDate: { type: Type.STRING, description: 'Expiry date in YYYY-MM-DD format (leave empty string if none detected)' },
-              mfdDate: { type: Type.STRING, description: 'Manufacturing date in YYYY-MM-DD format (leave empty string if none detected)' },
               barcode: { type: Type.STRING, description: 'Barcode numerical digits' },
-              batchNumber: { type: Type.STRING, description: 'Batch or Lot number' },
               mrp: { type: Type.STRING, description: 'Retail price or MRP' },
               category: { 
                 type: Type.STRING, 
                 enum: ['Medicine', 'Dairy', 'Vegetables', 'Fruits', 'Bakery', 'Snacks', 'Frozen Food', 'Beverages', 'Cosmetics', 'Baby Products', 'Supplements', 'Other'] 
               },
-              confidenceScore: { type: Type.NUMBER, description: 'Confidence score from 0.0 to 1.0' },
-              detectionMethod: { type: Type.STRING, description: 'Method used: Hybrid, Gemini, or OCR' },
-              rawText: { type: Type.STRING, description: 'Full text found on package' },
-              reason: { type: Type.STRING, description: 'Detailed reasoning explaining how the expiry date was identified and validated' }
+              rawText: { type: Type.STRING, description: 'Full text found on package exactly as printed, line-by-line' },
             },
-            required: ['productName', 'expiryDate', 'detectionMethod', 'reason'],
+            required: ['productName', 'rawText'],
           },
         },
       });
 
       const resultText = response.text || '{}';
       const parsed = JSON.parse(resultText);
-      return res.json(parsed);
+
+      // Deterministic Date Extractor on the Raw OCR Text (Step 3 to 6)
+      const extracted = rebuildDateExtractor(parsed.rawText || "");
+
+      const finalResponse = {
+        productName: parsed.productName || "Scanned Product",
+        brand: parsed.brand || "",
+        expiryDate: extracted.expiryDate || "", // Deterministic exact text matched by OCR regex
+        mfdDate: extracted.mfdDate || "",
+        barcode: parsed.barcode || "",
+        batchNumber: "",
+        mrp: parsed.mrp || "",
+        category: parsed.category || "Other",
+        confidenceScore: extracted.confidence,
+        detectionMethod: "Hybrid",
+        rawText: parsed.rawText || "",
+        reason: extracted.reason
+      };
+
+      return res.json(finalResponse);
     } catch (err: any) {
       console.warn('Error in /api/ocr-scan (falling back to mock response):', err.message);
       
@@ -125,74 +289,58 @@ Return the details in JSON structure matching the schema.`;
         {
           productName: "Amul Taaza Milk",
           brand: "Amul",
-          expiryDate: new Date(Date.now() + 4 * 86400000).toISOString().split('T')[0], 
-          mfdDate: new Date().toISOString().split('T')[0],
+          expiryDate: "",
+          mfdDate: "",
           barcode: "8901262010015",
           batchNumber: "B_MILK01",
           mrp: "₹30",
           category: "Dairy",
-          confidenceScore: 0.95,
-          rawText: "Amul Taaza Toned Milk Best Before 4 Days"
+          confidenceScore: 0.0,
+          rawText: "Amul Taaza Toned Milk\nMFG: 11/06/2026\nEXP: 15/06/2026",
+          detectionMethod: "OCR",
+          reason: ""
         },
         {
           productName: "Crocin Pain Relief",
           brand: "GlaxoSmithKline",
-          expiryDate: "2027-12-31",
-          mfdDate: "2025-06-01",
+          expiryDate: "",
+          mfdDate: "",
           barcode: "8901571000622",
           batchNumber: "CROC_99B",
           mrp: "₹120",
           category: "Medicine",
-          confidenceScore: 0.98,
-          rawText: "Crocin Pain Relief Max Strength Exp Dec 2027"
+          confidenceScore: 0.0,
+          rawText: "Crocin Pain Relief Max Strength\nMFD: 01/06/2025\nEXP: 31/12/2027",
+          detectionMethod: "OCR",
+          reason: ""
         },
         {
           productName: "Bourbon Chocolate Biscuits",
           brand: "Britannia",
-          expiryDate: "2026-12-15",
-          mfdDate: "2025-12-15",
+          expiryDate: "",
+          mfdDate: "",
           barcode: "8901063142212",
           batchNumber: "BOUR_23C",
           mrp: "₹40",
           category: "Snacks",
-          confidenceScore: 0.94,
-          rawText: "Britannia Bourbon Chocolate Premium Biscuits"
+          confidenceScore: 0.0,
+          rawText: "Britannia Bourbon Chocolate Premium Biscuits\nMFD: 15/12/2025\nEXP: 15/12/2026",
+          detectionMethod: "OCR",
+          reason: ""
         },
         {
           productName: "Harvest Gold White Bread",
           brand: "Harvest Gold",
-          expiryDate: new Date(Date.now() + 6 * 86400000).toISOString().split('T')[0],
-          mfdDate: new Date().toISOString().split('T')[0],
+          expiryDate: "",
+          mfdDate: "",
           barcode: "8906013620023",
           batchNumber: "HGD_88A",
           mrp: "₹45",
           category: "Bakery",
-          confidenceScore: 0.92,
-          rawText: "Harvest Gold Premium Bread"
-        },
-        {
-          productName: "Real Mixed Fruit Juice",
-          brand: "Real",
-          expiryDate: new Date(Date.now() + 120 * 86400000).toISOString().split('T')[0],
-          mfdDate: new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0],
-          barcode: "8902241100231",
-          batchNumber: "REAL_44F",
-          mrp: "₹110",
-          category: "Beverages",
-          confidenceScore: 0.96,
-          rawText: "Real Mixed Fruit Juice 1 Liter"
-        },
-        {
-          productName: "Dettol Liquid Handwash",
-          brand: "Dettol",
-          expiryDate: "2028-04-20",
-          mfdDate: "2025-04-20",
-          barcode: "8901396320011",
-          batchNumber: "DET_77D",
-          mrp: "₹99",
-          category: "Cosmetics",
-          confidenceScore: 0.97,
-          rawText: "Dettol Liquid Handwash Original"
+          confidenceScore: 0.0,
+          rawText: "Harvest Gold Premium Bread\nMFD: 24/07/2026\nEXP: 30/07/2026",
+          detectionMethod: "OCR",
+          reason: ""
         }
       ];
 
@@ -205,20 +353,22 @@ Return the details in JSON structure matching the schema.`;
           matchedTemplate = templates[2];
         } else if (fn.includes("bread") || fn.includes("toast") || fn.includes("bun") || fn.includes("bakery")) {
           matchedTemplate = templates[3];
-        } else if (fn.includes("juice") || fn.includes("beverage") || fn.includes("coke") || fn.includes("drink")) {
-          matchedTemplate = templates[4];
-        } else if (fn.includes("dettol") || fn.includes("soap") || fn.includes("handwash") || fn.includes("cosmetic")) {
-          matchedTemplate = templates[5];
         } else if (fn.includes("milk") || fn.includes("amul") || fn.includes("dairy")) {
           matchedTemplate = templates[0];
         }
       }
 
-      // 2. If no filename match or no filename, pick one deterministically based on image base64 length seed
       if (!matchedTemplate) {
         const seed = cleanBase64 ? (cleanBase64.length % templates.length) : 0;
         matchedTemplate = templates[seed];
       }
+
+      // deterministic parse on fallback rawText
+      const extracted = rebuildDateExtractor(matchedTemplate.rawText);
+      matchedTemplate.expiryDate = extracted.expiryDate || "";
+      matchedTemplate.mfdDate = extracted.mfdDate || "";
+      matchedTemplate.confidenceScore = extracted.confidence;
+      matchedTemplate.reason = extracted.reason;
 
       return res.json(matchedTemplate);
     }

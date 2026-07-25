@@ -7,6 +7,34 @@ interface CameraScannerModalProps {
   onSaveProduct: (p: Partial<Product>) => void;
 }
 
+const parseToIsoDate = (dateStr: string): string => {
+  if (!dateStr) return '';
+  if (/^\d{4}\-\d{2}\-\d{2}$/.test(dateStr)) return dateStr;
+
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmyMatch) {
+    const day = dmyMatch[1].padStart(2, '0');
+    const month = dmyMatch[2].padStart(2, '0');
+    const year = dmyMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // MM/YYYY or MM-YYYY
+  const myMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  if (myMatch) {
+    const month = myMatch[1].padStart(2, '0');
+    const year = myMatch[2];
+    return `${year}-${month}-01`;
+  }
+
+  const parsed = Date.parse(dateStr);
+  if (!isNaN(parsed)) {
+    return new Date(parsed).toISOString().split('T')[0];
+  }
+  return '';
+};
+
 export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
   onBack,
   onSaveProduct,
@@ -119,7 +147,10 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       setOcrResult(result);
 
       if (result.productName) setProductName(result.productName);
-      if (result.expiryDate) setExpiryDate(result.expiryDate);
+      if (result.expiryDate) {
+        const parsed = parseToIsoDate(result.expiryDate);
+        setExpiryDate(parsed || result.expiryDate);
+      }
       if (result.category) setCategory(result.category);
       if (result.brand) setBrand(result.brand);
     } catch (err) {
@@ -309,6 +340,12 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                     onChange={(e) => setExpiryDate(e.target.value)}
                     className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
+                  {ocrResult?.expiryDate && (
+                    <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <span>Detected on package:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{ocrResult.expiryDate}</span>
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
