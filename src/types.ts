@@ -114,10 +114,14 @@ export interface OcrScanResult {
   batchNumber?: string;
   mrp?: string;
   category?: ProductCategory;
+  location?: string;
+  recommendedLocation?: string;
   confidenceScore?: number;
   rawText?: string;
   detectionMethod?: string;
   reason?: string;
+  isCalculated?: boolean;
+  expiryLabel?: string;
 }
 
 export type PriorityLevel = 'Low' | 'Medium' | 'High';

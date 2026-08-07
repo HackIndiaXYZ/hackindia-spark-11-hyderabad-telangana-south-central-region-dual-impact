@@ -1,6 +1,42 @@
 import { Product, ProductStatus } from '../types';
 
 /**
+ * Safely parses date strings supporting YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD/MM/YY, and DD-MM-YY
+ * Defaulting to Indian date format (DD/MM/YYYY) without swapping day and month.
+ */
+export function parseAnyDate(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const clean = dateStr.trim();
+
+  // 1. YYYY-MM-DD or YYYY/MM/DD
+  const ymd = clean.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymd) {
+    const year = parseInt(ymd[1], 10);
+    const month = parseInt(ymd[2], 10);
+    const day = parseInt(ymd[3], 10);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return new Date(year, month - 1, day);
+    }
+  }
+
+  // 2. DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY or DD-MM-YY (Indian date format: Day first, Month second)
+  const dmy = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
+  if (dmy) {
+    const day = parseInt(dmy[1], 10);
+    const month = parseInt(dmy[2], 10);
+    let year = parseInt(dmy[3], 10);
+    if (year < 100) year += 2000;
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return new Date(year, month - 1, day);
+    }
+  }
+
+  const d = new Date(clean);
+  if (!isNaN(d.getTime())) return d;
+  return null;
+}
+
+/**
  * Calculates days remaining until expiry.
  * Returns negative numbers for expired items.
  */
@@ -10,7 +46,8 @@ export function getDaysUntilExpiry(expiryDateStr: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const expiryDate = new Date(expiryDateStr);
+  const expiryDate = parseAnyDate(expiryDateStr) || new Date(expiryDateStr);
+  if (isNaN(expiryDate.getTime())) return 0;
   expiryDate.setHours(0, 0, 0, 0);
 
   const diffTime = expiryDate.getTime() - today.getTime();
@@ -31,7 +68,7 @@ export function getExpiryStatus(expiryDateStr: string): ProductStatus {
 }
 
 /**
- * Formats YYYY-MM-DD string into human readable string (e.g. "Nov 30, 2026" or "Tomorrow")
+ * Formats date string into human readable string (e.g. "30 Nov 2026", "09-11-2026", or "Tomorrow")
  */
 export function formatDateDisplay(dateStr: string): string {
   if (!dateStr) return 'N/A';
@@ -40,13 +77,13 @@ export function formatDateDisplay(dateStr: string): string {
   if (days === 1) return 'Tomorrow';
   if (days === -1) return 'Yesterday';
 
-  const date = new Date(dateStr);
+  const date = parseAnyDate(dateStr) || new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr;
 
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
     month: 'short',
-    day: 'numeric',
+    year: 'numeric',
   });
 }
 

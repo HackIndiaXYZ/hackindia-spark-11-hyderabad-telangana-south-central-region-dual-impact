@@ -10,29 +10,59 @@ interface CameraScannerModalProps {
 
 const parseToIsoDate = (dateStr: string): string => {
   if (!dateStr) return '';
-  if (/^\d{4}\-\d{2}\-\d{2}$/.test(dateStr)) return dateStr;
+  const clean = dateStr.trim();
+  if (/^\d{4}\-\d{2}\-\d{2}$/.test(clean)) return clean;
 
-  // DD/MM/YYYY or DD-MM-YYYY
-  const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  // 1. Indian standard format: DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY or DD-MM-YY (Day first, Month second)
+  const dmyMatch = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/);
   if (dmyMatch) {
     const day = dmyMatch[1].padStart(2, '0');
     const month = dmyMatch[2].padStart(2, '0');
-    const year = dmyMatch[3];
+    let year = dmyMatch[3];
+    if (year.length === 2) {
+      year = `20${year}`;
+    }
+    const dNum = parseInt(day, 10);
+    const mNum = parseInt(month, 10);
+    if (dNum >= 1 && dNum <= 31 && mNum >= 1 && mNum <= 12) {
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  // 2. YYYY/MM/DD or YYYY-MM-DD
+  const ymdMatch = clean.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymdMatch) {
+    const year = ymdMatch[1];
+    const month = ymdMatch[2].padStart(2, '0');
+    const day = ymdMatch[3].padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
-  // MM/YYYY or MM-YYYY
-  const myMatch = dateStr.match(/^(\d{1,2})[\/\-](\d{4})$/);
+  // 3. MM/YYYY or MM-YYYY or MM/YY or MM-YY
+  const myMatch = clean.match(/^(\d{1,2})[\/\-](\d{2}|\d{4})$/);
   if (myMatch) {
     const month = myMatch[1].padStart(2, '0');
-    const year = myMatch[2];
+    let year = myMatch[2];
+    if (year.length === 2) {
+      year = `20${year}`;
+    }
     return `${year}-${month}-01`;
   }
 
-  const parsed = Date.parse(dateStr);
-  if (!isNaN(parsed)) {
-    return new Date(parsed).toISOString().split('T')[0];
+  const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const textMatch = clean.match(/^(\d{1,2})[\s\-\/]([a-zA-Z]+)[\s\-\/](\d{2}|\d{4})$/);
+  if (textMatch) {
+    const day = textMatch[1].padStart(2, '0');
+    const mStr = textMatch[2].toLowerCase().substring(0, 3);
+    let year = textMatch[3];
+    if (year.length === 2) year = `20${year}`;
+    const mIdx = monthNames.indexOf(mStr);
+    if (mIdx !== -1) {
+      const month = String(mIdx + 1).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
   }
+
   return '';
 };
 
@@ -162,18 +192,25 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
       const result: OcrScanResult = await response.json();
       setOcrResult(result);
 
-      if (result.productName) setProductName(result.productName);
+      if (result.productName && !/scanned\s*item|scanned\s*product/i.test(result.productName)) {
+        setProductName(result.productName);
+      } else {
+        setProductName('Unknown Product');
+      }
+
       if (result.expiryDate) {
         const parsed = parseToIsoDate(result.expiryDate);
         setExpiryDate(parsed || result.expiryDate);
       }
       if (result.category) setCategory(result.category);
       if (result.brand) setBrand(result.brand);
+      if (result.location || result.recommendedLocation) {
+        setLocation(result.location || result.recommendedLocation || 'Kitchen');
+      }
     } catch (err) {
       console.error('Analysis error:', err);
-      // Fallback
-      setProductName('Scanned Item');
-      setExpiryDate(new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]);
+      setProductName('Unknown Product');
+      setExpiryDate('');
     } finally {
       setIsAnalyzing(false);
     }
@@ -351,7 +388,7 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                   </label>
                   {ocrResult && !expiryDate && (
                     <div className="p-2.5 mb-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-[11px] font-semibold border border-rose-100 dark:border-rose-900/30">
-                      ⚠️ No expiry date detected. Please enter it manually.
+                      ⚠️ {ocrResult.expiryLabel || ocrResult.reason || "No expiry date detected. Please enter it manually."}
                     </div>
                   )}
                   <input
@@ -362,8 +399,14 @@ export const CameraScannerModal: React.FC<CameraScannerModalProps> = ({
                   />
                   {ocrResult?.expiryDate && (
                     <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                      <span>Detected on package:</span>
+                      <span>{ocrResult.expiryLabel ? `${ocrResult.expiryLabel}:` : (ocrResult.isCalculated ? "Calculated from Manufacturing Date:" : "Detected on package:")}</span>
                       <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{ocrResult.expiryDate}</span>
+                    </p>
+                  )}
+                  {ocrResult?.mfdDate && (
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <span>Manufacturing Date:</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{ocrResult.mfdDate}</span>
                     </p>
                   )}
                 </div>
